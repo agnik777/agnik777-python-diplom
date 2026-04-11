@@ -113,7 +113,7 @@ class User(AbstractUser):
 class Shop(models.Model):
     name = models.CharField(max_length=40, verbose_name='Название')
     url = models.URLField(verbose_name='Ссылка', blank=True)
-    seller = models.ForeignKey(User, verbose_name='Продавец', blank=True,
+    owner = models.ForeignKey(User, verbose_name='Владелец', null=True,
                                related_name='shops', on_delete=models.CASCADE)
 
     class Meta:
@@ -158,6 +158,8 @@ class ProductInfo(models.Model):
     product = models.ForeignKey(Product, verbose_name='Продукт',
                                    related_name='product_infos',
                                    on_delete=models.CASCADE)
+    external_id = models.PositiveIntegerField(verbose_name='Внешний ИД',
+                                              default=0, null=False)
     full_name = models.CharField(max_length=60, verbose_name='Полное название')
     shop = models.ForeignKey(Shop, verbose_name='Магазин',
                                 related_name='product_infos',
