@@ -1,3 +1,4 @@
+# settings.py
 """
 Django settings for orders project.
 
@@ -10,7 +11,11 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
+from dotenv import load_dotenv
 from pathlib import Path
+
+load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -20,10 +25,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure--heu_kbhio*66e-vicwj!^=ile8xd6e@1g=9)lsp(0zz8bfeli'
+SECRET_KEY = os.getenv('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DEBUG')
 
 ALLOWED_HOSTS = ['*']
 
@@ -120,7 +125,62 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
+AUTH_USER_MODEL = 'backend.User'
+
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+
+EMAIL_HOST = 'smtp.mail.ru'
+
+EMAIL_HOST_USER = os.getenv('MY_EMAIL')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_PASSWORD')
+EMAIL_PORT = 465
+EMAIL_USE_SSL = True
+# EMAIL_USE_TLS = True
+SERVER_EMAIL = os.getenv('MY_EMAIL')
+DEFAULT_FROM_EMAIL = os.getenv('MY_EMAIL')
+
+if DEBUG:
+    BACKEND_URL = 'http://localhost:8000'  # Разработка
+    FRONTEND_URL = 'http://localhost:3000'
+else:
+    BACKEND_URL = 'https://api.your-domain.com'  # ваш бэкенд
+    FRONTEND_URL = 'https://your-domain.com'  # ваш фронтенд
+
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.TokenAuthentication',
+    ],
+}
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Настройки для импорта YAML файлов
+YAML_IMPORT_ALLOWED_PATHS = [
+    '/data/imports/',
+    '/var/www/uploads/',
+    './imports/',
+    './uploads/',
+    '/tmp/yaml_imports/',  # Добавляем временную папку
+]
+
+# Максимальный размер файла для импорта (в байтах)
+YAML_MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+
+# Таймаут для загрузки по URL (в секундах)
+YAML_DOWNLOAD_TIMEOUT = 30
+
+# Разрешенные MIME типы для YAML файлов
+YAML_ALLOWED_MIME_TYPES = [
+    'application/x-yaml',
+    'text/yaml',
+    'text/x-yaml',
+    'application/yaml',
+    'text/plain',  # Некоторые серверы возвращают text/plain для YAML
+]
+
+# Настройки для парсинга YAML
+YAML_LOADER = 'yaml.SafeLoader'  # Безопасный загрузчик

@@ -1,3 +1,4 @@
+# models.py
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractUser, Group, Permission
 from django.contrib.auth.validators import UnicodeUsernameValidator
@@ -20,6 +21,7 @@ STATE_CHOICES = (
 USER_TYPE_CHOICES = (
     ('owner', 'Владелец'),
     ('buyer', 'Покупатель'),
+    ('admin', 'Администратор'),
 )
 
 
@@ -34,6 +36,8 @@ class UserManager(BaseUserManager):
         if not email:
             raise ValueError('The given email must be set')
         email = self.normalize_email(email)
+        # Устанавливаем is_active=False для новых пользователей
+        extra_fields.setdefault('is_active', False)
         user = self.model(email=email, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
@@ -47,6 +51,9 @@ class UserManager(BaseUserManager):
     def create_superuser(self, email, password, **extra_fields):
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
+        # Суперпользователь должен быть активным сразу
+        extra_fields.setdefault('is_active', True)
+        extra_fields.setdefault('type', 'admin')
         if extra_fields.get('is_staff') is not True:
             raise ValueError('Superuser must have is_staff=True.')
         if extra_fields.get('is_superuser') is not True:
@@ -58,7 +65,7 @@ class User(AbstractUser):
     """
     Стандартная модель пользователей
     """
-    REQUIRED_FIELDS = []
+    REQUIRED_FIELDS = ['first_name', 'last_name']
     objects = UserManager()
     USERNAME_FIELD = 'email'
     email = models.EmailField(_('email address'), unique=True)
@@ -74,7 +81,7 @@ class User(AbstractUser):
                                     "exists.")},
     )
     is_active = models.BooleanField(
-        _('active'), default=False,
+        _('active'), default=True,
         help_text=_(
             'Designates whether this user should be treated as active. '
             'Unselect this instead of deleting accounts.'
@@ -83,6 +90,16 @@ class User(AbstractUser):
     type = models.CharField(verbose_name='Тип пользователя',
                            choices=USER_TYPE_CHOICES, max_length=5,
                            default='buyer')
+
+    last_login_time = models.DateTimeField(
+        verbose_name='Время последнего входа',
+        null=True,
+        blank=True
+    )
+    login_count = models.IntegerField(
+        verbose_name='Количество входов',
+        default=0
+    )
 
     # Поля с уникальными related_name
     groups = models.ManyToManyField(
@@ -115,6 +132,8 @@ class Shop(models.Model):
     url = models.URLField(verbose_name='Ссылка', blank=True)
     owner = models.ForeignKey(User, verbose_name='Владелец', null=True,
                                related_name='shops', on_delete=models.CASCADE)
+    permissions_order = models.BooleanField(verbose_name='Заказ разрешен',
+                                            default=True)
 
     class Meta:
         verbose_name = 'Магазин'
@@ -174,7 +193,7 @@ class ProductInfo(models.Model):
         verbose_name = 'Информация о продукте'
         verbose_name_plural = 'Информационный список о продуктах'
         constraints = [
-            models.UniqueConstraint(fields=['product', 'full_name', 'shop'],
+            models.UniqueConstraint(fields=['product', 'external_id', 'shop'],
                                     name='unique_product_info'),
         ]
 
