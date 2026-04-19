@@ -1,0 +1,185 @@
+shop: Связной
+categories:
+  - id: 224
+    name: Смартфоны
+  - id: 15
+    name: Аксессуары
+  - id: 1
+    name: Flash-накопители
+  - id: 5
+    name: Телевизоры
+
+goods:
+  - id: 4216292
+    category: 224
+    name: Смартфон Apple iPhone
+    full_name: Смартфон Apple iPhone XS Max 512GB (золотистый)
+    retail_price: 116990
+    wholesale_price: 110000
+    quantity: 14
+    parameters:
+      "model": apple/iphone/xs-max
+      "Диагональ (дюйм)": 6.5
+      "Разрешение (пикс)": 2688x1242
+      "Встроенная память (Гб)": 512
+      "Цвет": золотистый
+  - id: 4216313
+    category: 224
+    name: Смартфон Apple iPhone
+    full_name: Смартфон Apple iPhone XR 256GB (красный)
+    retail_price: 69990
+    wholesale_price: 65000
+    quantity: 9
+    parameters:
+      "model": apple/iphone/xr
+      "Диагональ (дюйм)": 6.1
+      "Разрешение (пикс)": 1792x828
+      "Встроенная память (Гб)": 256
+      "Цвет": красный
+  - id: 4216226
+    category: 224
+    name: Смартфон Apple iPhone
+    full_name: Смартфон Apple iPhone XR 256GB (черный)
+    retail_price: 69990
+    wholesale_price: 65000
+    quantity: 5
+    parameters:
+      "model": apple/iphone/xr
+      "Диагональ (дюйм)": 6.1
+      "Разрешение (пикс)": 1792x828
+      "Встроенная память (Гб)": 256
+      "Цвет": черный
+  - id: 4672670
+    category: 224
+    name: Смартфон Apple iPhone
+    full_name: Смартфон Apple iPhone XR 128GB (синий)
+    retail_price: 64990
+    wholesale_price: 60000
+    quantity: 7
+    parameters:
+      "model": apple/iphone/xr
+      "Диагональ (дюйм)": 6.1
+      "Разрешение (пикс)": 1792x828
+      "Встроенная память (Гб)": 256
+      "Цвет": синий
+  - id: 1234567
+    category: 15
+    name: Smartphone Samsung Galaxy
+    full_name: Smartphone Samsung Galaxy S20 128GB (black)
+    retail_price: 84990
+    wholesale_price: 80000
+    quantity: 5
+    parameters:
+      "model": samsung/galaxy-s20
+      "Screen Size (inches)": 6.2
+      "Resolution (pixels)": 3200x1440
+      "Internal Memory (GB)": 128
+      "Color": black
+  - id: 1234568
+    category: 15
+    name: Smartphone Samsung Galaxy
+    full_name: Smartphone Samsung Galaxy Note20 256GB (mystic bronze)
+    retail_price: 99990
+    wholesale_price: 95000
+    quantity: 3
+    parameters:
+      "model": samsung/galaxy-note20
+      "Screen Size (inches)": 6.7
+      "Resolution (pixels)": 2400x1080
+      "Internal Memory (GB)": 256
+      "Color": mystic bronze
+  - id: 1235464569
+    category: 1
+    name: USB Flash Drive
+    full_name: USB Flash Drive SanDisk Ultra Flair 64GB (silver)
+    retail_price: 1990
+    wholesale_price: 1500
+    quantity: 10
+    parameters:
+      "model": sandisk/ultra-flair-64gb
+      "Capacity (GB)": 64
+      "Color": silver
+  - id: 1235434570
+    category: 1
+    name: USB Flash Drive
+    full_name: USB Flash Drive Kingston DataTraveler 32GB (red)
+    retail_price: 1290
+    wholesale_price: 1000
+    quantity: 8
+    parameters:
+      "model": kingston/datatraveler-32gb
+      "Capacity (GB)": 32
+      "Color": red
+  - id: 123544571
+    category: 224
+    name: Smartphone Xiaomi
+    full_name: Smartphone Xiaomi Mi 10T Pro 256GB (cosmic black)
+    retail_price: 74990
+    wholesale_price: 70000
+    quantity: 6
+    parameters:
+      "model": xiaomi/mi-10t-pro
+      "Screen Size (inches)": 6.67
+      "Resolution (pixels)": 2400x1080
+      "Internal Memory (GB)": 256
+      "Color": cosmic black
+  - id: 1234572
+    category: 5
+    name: Samsung QLED
+    full_name: Samsung QLED Q90R 65" 4K UHD Smart TV
+    retail_price: 2999
+    wholesale_price: 2500
+    quantity: 4
+    parameters:
+      "model": samsung/qled-q90r
+      "Screen Size (inches)": 65
+      "Resolution (pixels)": 3840x2160
+      "Smart TV": true
+  - id: 123476573
+    category: 5
+    name: LG OLED
+    full_name: LG OLED CX 55" 4K UHD Smart TV
+    retail_price: 1999
+    wholesale_price: 1800
+    quantity: 7
+    parameters:
+      "model": lg/oled-cx
+      "Screen Size (inches)": 55
+      "Resolution (pixels)": 3840x2160
+      "Smart TV": true
+  - id: 1234453574
+    category: 5
+    name: Sony Bravia
+    full_name: Sony Bravia X900H 75" 4K UHD Smart TV
+    retail_price: 3499
+    wholesale_price: 3000
+    quantity: 3
+    parameters:
+      "model": sony/bravia-x900h
+      "Screen Size (inches)": 75
+      "Resolution (pixels)": 3840x2160
+      "Smart TV": true
+  - id: 123234575
+    category: 5
+    name: TCL 6-Series
+    full_name: TCL 6-Series 55" 4K UHD Smart TV
+    retail_price: 799
+    wholesale_price: 700
+    quantity: 10
+    parameters:
+      "model": tcl/6-series
+      "Screen Size (inches)": 55
+      "Resolution (pixels)": 3840x2160
+      "Smart TV": true
+  - id: 123424576
+    category: 5
+    name: Vizio P-Series
+    full_name: Vizio P-Series Quantum 65" 4K UHD Smart TV
+    retail_price: 1299
+    wholesale_price: 1200
+    quantity: 5
+    parameters:
+      "model": vizio/p-series-quantum
+      "Screen Size (inches)": 65
+      "Resolution (pixels)": 3840x2160
+      "Smart TV": true

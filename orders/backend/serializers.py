@@ -2,7 +2,7 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model, authenticate
 from django.utils.translation import gettext_lazy as _
-from .models import ConfirmEmailToken
+# from .models import ConfirmEmailToken
 from .models import (Shop, Category, Product, ProductInfo, Parameter,
                      ProductParameter)
 
@@ -152,12 +152,6 @@ class YAMLProductSerializer(serializers.Serializer):
     )
     parameters = YAMLParameterSerializer(required=False)
 
-    def validate_category(self, value):
-        """Проверка существования категории"""
-        if not Category.objects.filter(id=value).exists():
-            raise serializers.ValidationError(f"Категория с id={value} не найдена")
-        return value
-
     def validate(self, data):
         """Дополнительная валидация"""
         # Если wholesale_price не указан, используем retail_price
@@ -189,5 +183,14 @@ class YAMLImportSerializer(serializers.Serializer):
         product_ids = [product['id'] for product in data['goods']]
         if len(product_ids) != len(set(product_ids)):
             raise serializers.ValidationError("ID товаров должны быть уникальными")
+
+        # Проверяем, что все категории товаров есть в списке категорий
+        category_ids_set = set(category_ids)
+        for i, product in enumerate(data['goods']):
+            if product['category'] not in category_ids_set:
+                raise serializers.ValidationError(
+                    f"Товар #{i}: категория с id={product['category']} "
+                    f"не найдена в списке категорий"
+                )
 
         return data

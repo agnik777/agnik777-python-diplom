@@ -3,7 +3,8 @@ import yaml
 from django.core.exceptions import ValidationError
 from yaml import Loader
 
-from .models import Shop, Category, Product, ProductInfo, Parameter, ProductParameter
+from .models import (Shop, Category, Product, ProductInfo, Parameter,
+                     ProductParameter)
 
 
 class YAMLProcessor:
@@ -42,7 +43,8 @@ class YAMLProcessor:
         if not isinstance(data['goods'], list):
             raise ValidationError('"goods" должен быть списком')
 
-        required_item_keys = ['id', 'name', 'category', 'quantity', 'retail_price']
+        required_item_keys = ['id', 'name', 'category', 'quantity',
+                              'retail_price']
 
         for i, item in enumerate(data['goods']):
             for key in required_item_keys:
@@ -96,6 +98,8 @@ class YAMLProcessor:
 
         # Обработка категорий
         categories_processed = 0
+        category_map = {}  # Словарь для быстрого доступа к категориям
+
         for category in data['categories']:
             category_object, _ = Category.objects.get_or_create(
                 id=category['id'],
@@ -104,6 +108,7 @@ class YAMLProcessor:
             # Добавляем магазин в категорию через ManyToMany
             category_object.shops.add(shop)
             categories_processed += 1
+            category_map[category['id']] = category_object
 
         # Удаление старых товаров магазина
         deleted_count = ProductInfo.objects.filter(shop=shop).delete()[0]
@@ -113,11 +118,12 @@ class YAMLProcessor:
         parameters_processed = 0
 
         for item in data['goods']:
-            # Получаем категорию
-            try:
-                category = Category.objects.get(id=item['category'])
-            except Category.DoesNotExist:
-                raise ValidationError(f"Категория с id={item['category']} не найдена")
+            # Получаем категорию из словаря
+            category_id = item['category']
+            if category_id not in category_map:
+                raise ValidationError(f"Категория с id={category_id} не найдена в загружаемых данных")
+
+            category = category_map[category_id]
 
             # Создаем или получаем продукт
             product, _ = Product.objects.get_or_create(
