@@ -1,30 +1,27 @@
 # views.py
 import yaml
-# import requests
-from datetime import timedelta
+from datetime import timedelta, datetime
 
-# from django.core.validators import URLValidator
-# from django.core.exceptions import ValidationError
 from django.http import JsonResponse
 from django.utils import timezone
-# from requests import get
+from rest_framework.pagination import PageNumberPagination
+
 from rest_framework.views import APIView
-# from yaml import load as load_yaml, Loader
-from .models import (Shop, Category, Product, ProductInfo, Parameter,
-                     ProductParameter, ConfirmEmailToken)
+from .models import Shop, ConfirmEmailToken, ProductInfo
 from requests.exceptions import RequestException
-from rest_framework import generics, status
+from rest_framework import generics, status, filters
 from rest_framework.authtoken.models import Token
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from .permissions import IsShopOwner
-from .serializers import YAMLImportSerializer
+from .serializers import YAMLImportSerializer, UserRegistrationSerializer, UserLoginSerializer, ShopSerializer, \
+    ShopCategorySerializer, ProductInfoSerializer, ProductSearchSerializer
 from .yaml_processor import YAMLProcessor
 from .file_loader import FileLoader
-from .serializers import UserRegistrationSerializer, UserLoginSerializer
 from django.core.mail import send_mail
 from django.core.exceptions import ValidationError
 from django.conf import settings
+from django.db.models import Q
 
 
 class UserRegistrationView(generics.CreateAPIView):
@@ -219,4 +216,175 @@ class PartnerUpdate(APIView):
             {'Status': False, 'Error': f'Внутренняя ошибка: {str(error)}'},
             status=500
         )
+
+
+class ShopListView(generics.ListAPIView):
+    """
+    API для получения списка активных магазинов
+    GET /api/shops/
+    """
+    queryset = Shop.objects.filter(permissions_order=True).order_by('name')
+    serializer_class = ShopSerializer
+
+
+class ShopCategoriesView(generics.ListAPIView):
+    """
+    API для получения магазинов с их категориями
+    GET /api/shops/categories/
+    Ответ: сначала магазины, внутри каждого - список категорий
+    """
+    serializer_class = ShopCategorySerializer
+
+    def get_queryset(self):
+        """Получаем магазины с разрешенными заказами и их категории"""
+        queryset = Shop.objects.filter(
+            permissions_order=True
+        ).prefetch_related(
+            'categories'
+        ).order_by('name')
+
+        # Фильтрация по категории (опционально)
+        category_id = self.request.query_params.get('category_id')
+        if category_id:
+            queryset = queryset.filter(categories__id=category_id)
+
+        # Фильтрация по названию магазина (опционально)
+        shop_name = self.request.query_params.get('shop_name')
+        if shop_name:
+            queryset = queryset.filter(name__icontains=shop_name)
+
+        return queryset.distinct()
+
+
+class ProductSearchView(generics.ListAPIView):
+    """
+    API для поиска товаров по параметрам
+    GET /api/products/search/
+
+    Параметры запроса:
+    - shop_name: название магазина (частичное совпадение)
+    - category_name: название категории (частичное совпадение)
+    - product_name: название товара (частичное совпадение)
+    - min_price: минимальная розничная цена
+    - max_price: максимальная розничная цена
+    - in_stock_only: только товары в наличии (quantity > 0)
+    - page: номер страницы (пагинация)
+    """
+    serializer_class = ProductInfoSerializer
+    pagination_class = PageNumberPagination
+
+    def get_queryset(self):
+        """
+        Возвращает отфильтрованный queryset товаров.
+        """
+        # Получаем и валидируем параметры запроса
+        serializer = ProductSearchSerializer(data=self.request.query_params)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        # Базовый запрос с оптимизацией (select_related и prefetch_related)
+        queryset = ProductInfo.objects.select_related(
+            'shop', 'product', 'product__category'
+        ).prefetch_related('product_parameters__parameter').filter(
+            shop__permissions_order=True
+        )
+
+        # Применяем фильтры
+        queryset = self.apply_filters(queryset, data)
+
+        # Фильтруем просроченные товары
+        queryset = self.exclude_expired_products(queryset)
+
+        # Фильтр по наличию
+        if data.get('in_stock_only'):
+            queryset = queryset.filter(quantity__gt=0)
+
+        return queryset.order_by('-id')
+
+    def apply_filters(self, queryset, filters_data):
+        """Применение фильтров к queryset"""
+        shop_name = filters_data.get('shop_name')
+        if shop_name:
+            queryset = queryset.filter(shop__name__icontains=shop_name)
+
+        category_name = filters_data.get('category_name')
+        if category_name:
+            queryset = queryset.filter(product__category__name__icontains=category_name)
+
+        product_name = filters_data.get('product_name')
+        if product_name:
+            queryset = queryset.filter(
+                Q(full_name__icontains=product_name) |
+                Q(product__name__icontains=product_name)
+            )
+
+        min_price = filters_data.get('min_price')
+        max_price = filters_data.get('max_price')
+
+        if min_price is not None:
+            queryset = queryset.filter(retail_price__gte=min_price)
+
+        if max_price is not None:
+            queryset = queryset.filter(retail_price__lte=max_price)
+
+        return queryset
+
+    def exclude_expired_products(self, queryset):
+        """
+        Исключает просроченные товары.
+        Обрабатывает поле sell_up_to в формате YYYY-mm-dd или dd.mm.YYYY
+        """
+        today = timezone.now().date()
+
+        # Создаем список для условий исключения
+        exclude_conditions = Q()
+
+        # Обрабатываем каждый товар
+        for product_info in queryset:
+            sell_up_to = product_info.sell_up_to
+
+            # Пропускаем пустые значения
+            if not sell_up_to or sell_up_to.strip() == '':
+                continue
+
+            try:
+                # Пробуем разные форматы даты
+                date_obj = None
+
+                # Формат YYYY-mm-dd
+                if '-' in sell_up_to and len(sell_up_to.split('-')[0]) == 4:
+                    try:
+                        date_obj = datetime.strptime(sell_up_to, '%Y-%m-%d').date()
+                    except ValueError:
+                        pass
+
+                # Формат dd.mm.YYYY
+                if not date_obj and '.' in sell_up_to:
+                    try:
+                        date_obj = datetime.strptime(sell_up_to, '%d.%m.%Y').date()
+                    except ValueError:
+                        pass
+
+                # Если дата определена и просрочена, добавляем в условия исключения
+                if date_obj and date_obj < today:
+                    exclude_conditions |= Q(id=product_info.id)
+
+            except (ValueError, AttributeError):
+                # Если формат даты некорректный, пропускаем этот товар
+                continue
+
+        # Исключаем просроченные товары
+        return queryset.exclude(exclude_conditions)
+
+    def list(self, request, *args, **kwargs):
+        """Переопределяем для добавления метаданных"""
+        queryset = self.filter_queryset(self.get_queryset())
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
 

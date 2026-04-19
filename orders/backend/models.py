@@ -187,7 +187,7 @@ class ProductInfo(models.Model):
     retail_price = models.PositiveIntegerField(verbose_name='Розничная цена')
     wholesale_price = models.PositiveIntegerField(verbose_name='Оптовая цена')
     sell_up_to = models.CharField(max_length=10, verbose_name='Продать до',
-                                  blank=True)
+                                  default='')
 
     class Meta:
         verbose_name = 'Информация о продукте'

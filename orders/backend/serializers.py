@@ -2,7 +2,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model, authenticate
 from django.utils.translation import gettext_lazy as _
-# from .models import ConfirmEmailToken
 from .models import (Shop, Category, Product, ProductInfo, Parameter,
                      ProductParameter)
 
@@ -57,6 +56,24 @@ class UserLoginSerializer(serializers.Serializer):
         return attrs
 
 
+class CategoryListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Category
+        fields = ['id', 'name']
+        read_only_fields = ['id']
+
+
+class ShopCategorySerializer(serializers.ModelSerializer):
+    """Сериализатор для магазинов с категориями"""
+    categories = CategoryListSerializer(many=True, read_only=True)
+    owner_email = serializers.EmailField(source='owner.email', read_only=True)
+
+    class Meta:
+        model = Shop
+        fields = ['id', 'name', 'url', 'owner', 'owner_email', 'permissions_order', 'categories']
+        read_only_fields = ['id', 'owner', 'owner_email']
+
+
 class ShopSerializer(serializers.ModelSerializer):
     """Сериализатор для магазина"""
     owner_email = serializers.EmailField(source='owner.email', read_only=True)
@@ -92,6 +109,7 @@ class ParameterSerializer(serializers.ModelSerializer):
     class Meta:
         model = Parameter
         fields = ['id', 'name']
+        read_only_fields = ['id']
 
 
 class ProductParameterSerializer(serializers.ModelSerializer):
@@ -116,6 +134,28 @@ class ProductInfoSerializer(serializers.ModelSerializer):
             'full_name', 'shop', 'shop_name', 'quantity',
             'retail_price', 'wholesale_price', 'parameters'
         ]
+
+
+class ProductSearchSerializer(serializers.Serializer):
+    """Сериализатор для поиска товаров"""
+    shop_name = serializers.CharField(required=False, allow_blank=True)
+    category_name = serializers.CharField(required=False, allow_blank=True)
+    product_name = serializers.CharField(required=False, allow_blank=True)
+    min_price = serializers.IntegerField(required=False, min_value=0)
+    max_price = serializers.IntegerField(required=False, min_value=0)
+    in_stock_only = serializers.BooleanField(required=False, default=False)
+
+    def validate(self, data):
+        """Валидация ценового диапазона"""
+        min_price = data.get('min_price')
+        max_price = data.get('max_price')
+
+        if min_price and max_price and min_price > max_price:
+            raise serializers.ValidationError({
+                'min_price': 'Минимальная цена не может быть больше максимальной'
+            })
+
+        return data
 
 
 # Сериализаторы для YAML импорта
@@ -194,3 +234,7 @@ class YAMLImportSerializer(serializers.Serializer):
                 )
 
         return data
+
+
+
+
