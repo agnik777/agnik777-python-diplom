@@ -2,9 +2,13 @@
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractUser, Group, Permission
 from django.contrib.auth.validators import UnicodeUsernameValidator
+from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django_rest_passwordreset.tokens import get_token_generator
+
+from .utils import ProductUtils
 
 
 STATE_CHOICES = (
@@ -81,7 +85,7 @@ class User(AbstractUser):
                                     "exists.")},
     )
     is_active = models.BooleanField(
-        _('active'), default=True,
+        _('active'), default=False,
         help_text=_(
             'Designates whether this user should be treated as active. '
             'Unselect this instead of deleting accounts.'
@@ -197,6 +201,42 @@ class ProductInfo(models.Model):
                                     name='unique_product_info'),
         ]
 
+    def is_available(self):
+        """Проверяет доступность товара"""
+        # Проверка магазина
+        if not self.shop.permissions_order:
+            return False
+
+        # Проверка наличия
+        if self.quantity <= 0:
+            return False
+
+        # Проверка срока годности
+        if ProductUtils.is_product_expired(self):
+            return False
+
+        return True
+
+    def get_available_quantity(self):
+        """Возвращает доступное количество товара"""
+        if not self.is_available():
+            return 0
+        return self.quantity
+
+    def get_sell_date(self):
+        """Возвращает дату продажи как объект date или None"""
+        return ProductUtils.parse_date(self.sell_up_to)
+
+    def days_until_expiry(self):
+        """Возвращает количество дней до истечения срока годности"""
+        sell_date = self.get_sell_date()
+        if not sell_date:
+            return None
+
+        today = timezone.now().date()
+        delta = sell_date - today
+        return delta.days
+
 
 class Parameter(models.Model):
     name = models.CharField(max_length=40, verbose_name='Название')
@@ -244,9 +284,29 @@ class Contact(models.Model):
     class Meta:
         verbose_name = 'Контакты пользователя'
         verbose_name_plural = 'Список контактов пользователей'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'city', 'street', 'house'],
+                name='unique_user_address'
+            )
+        ]
 
     def __str__(self):
         return f'{self.city}, {self.street}, {self.house}'
+
+    def clean(self):
+        """Проверяем, что у пользователя не более 5 контактов"""
+        if self.user and not self.pk:  # Только при создании нового
+            if self.user.contacts.count() >= 5:
+                # Разрешаем создание только для дефолтных контактов
+                if self.city == 'Не указан' and self.street == 'Не указана':
+                    return
+                raise ValidationError(
+                    'У пользователя может быть не более 5 контактов')
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
 
 class Phone(models.Model):

@@ -4,7 +4,6 @@ import requests
 from django.conf import settings
 from django.core.validators import URLValidator
 from django.core.exceptions import ValidationError
-from requests.exceptions import RequestException
 
 
 class FileLoader:
@@ -56,7 +55,8 @@ class FileLoader:
         ])
 
         # Проверяем MIME тип или расширение в URL
-        content_type_valid = any(mime in content_type.lower() for mime in allowed_mime_types)
+        content_type_valid = any(mime in content_type.lower()
+                                 for mime in allowed_mime_types)
         url_extension_valid = url.lower().endswith(('.yaml', '.yml'))
 
         if not content_type_valid and not url_extension_valid:
@@ -95,7 +95,8 @@ class FileLoader:
         max_size = getattr(settings, 'YAML_MAX_FILE_SIZE', 10 * 1024 * 1024)
         file_size = os.path.getsize(normalized_path)
         if file_size > max_size:
-            raise ValidationError(f'Размер файла превышает {max_size / 1024 / 1024}MB')
+            raise ValidationError(f'Размер файла превышает '
+                                  f'{max_size / 1024 / 1024}MB')
 
         # Чтение файла
         with open(normalized_path, 'rb') as f:

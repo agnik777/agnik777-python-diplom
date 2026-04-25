@@ -36,15 +36,18 @@ class UserAdmin(BaseUserAdmin):
     # Поля для формы изменения пользователя
     fieldsets = (
         (None, {'fields': ('email', 'password')}),
-        (_('Personal info'), {'fields': ('first_name', 'last_name', 'username', 'company', 'type')}),
+        (_('Personal info'), {'fields': ('first_name', 'last_name', 'username',
+                                         'company', 'type')}),
         (_('Permissions'), {
-            'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions'),
+            'fields': ('is_active', 'is_staff', 'is_superuser', 'groups',
+                       'user_permissions'),
         }),
         (_('Important dates'), {'fields': ('last_login', 'date_joined')}),
     )
 
     # Отображение в списке пользователей
-    list_display = ('email', 'first_name', 'last_name', 'type', 'is_active', 'is_staff')
+    list_display = ('email', 'first_name', 'last_name', 'type', 'is_active',
+                    'is_staff')
     list_filter = ('is_active', 'is_staff', 'is_superuser', 'type')
     search_fields = ('email', 'first_name', 'last_name')
     ordering = ('email',)

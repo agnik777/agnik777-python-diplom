@@ -1,6 +1,10 @@
 from django.urls import path
 from .views import (UserRegistrationView, ConfirmEmailView,
-                    UserLoginView, PartnerUpdate, ShopListView, ShopCategoriesView, ProductSearchView)
+                    UserLoginView, PartnerUpdate, ShopListView,
+                    ShopCategoriesView, ProductSearchView, CartView,
+                    CartItemDetailView, ProductDetailView, PhoneView,
+                    ContactDetailView, OrderCreateView, OrderConfirmView,
+                    OrderListView, OrderDetailView, ContactViewSet)
 
 
 urlpatterns = [
@@ -8,8 +12,27 @@ urlpatterns = [
     path('confirm-email/<str:token_key>/', ConfirmEmailView.as_view(),
          name='confirm-email'),
     path('login/', UserLoginView.as_view(), name='login'),
-    path('partner/update/', PartnerUpdate.as_view(), name='partner-update'),
+    path('partner/update/', PartnerUpdate.as_view(),
+         name='partner-update'),
     path('shops/', ShopListView.as_view(), name='shop-list'),
-    path('shop/categories/', ShopCategoriesView.as_view(), name='shop-categories'),
-    path('products/search/', ProductSearchView.as_view(), name='product-search'),
+    path('shop/categories/', ShopCategoriesView.as_view(),
+         name='shop-categories'),
+    path('products/search/', ProductSearchView.as_view(),
+         name='product-search'),
+    path('cart/', CartView.as_view(), name='cart'),
+    path('cart/items/<int:item_id>/', CartItemDetailView.as_view(),
+         name='cart-item-detail'),
+    path('products/<int:pk>/', ProductDetailView.as_view(),
+         name='product-detail'),
+    path('phone/', PhoneView.as_view(), name='phone'),
+    path('contacts/', ContactViewSet.as_view(), name='contact-list'),
+    path('contacts/<int:pk>/', ContactDetailView.as_view(),
+         name='contact-detail'),
+    path('orders/create/', OrderCreateView.as_view(),
+         name='order-create'),
+    path('orders/confirm/', OrderConfirmView.as_view(),
+         name='order-confirm'),
+    path('orders/', OrderListView.as_view(), name='order-list'),
+    path('orders/<int:pk>/', OrderDetailView.as_view(),
+         name='order-detail'),
 ]

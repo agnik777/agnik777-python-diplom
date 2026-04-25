@@ -3,7 +3,7 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model, authenticate
 from django.utils.translation import gettext_lazy as _
 from .models import (Shop, Category, Product, ProductInfo, Parameter,
-                     ProductParameter)
+                     ProductParameter, OrderItem, Order, Phone, Contact)
 
 
 User = get_user_model()
@@ -70,7 +70,8 @@ class ShopCategorySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Shop
-        fields = ['id', 'name', 'url', 'owner', 'owner_email', 'permissions_order', 'categories']
+        fields = ['id', 'name', 'url', 'owner', 'owner_email',
+                  'permissions_order', 'categories']
         read_only_fields = ['id', 'owner', 'owner_email']
 
 
@@ -86,7 +87,8 @@ class ShopSerializer(serializers.ModelSerializer):
 
 class CategorySerializer(serializers.ModelSerializer):
     """Сериализатор для категории"""
-    shops_count = serializers.IntegerField(source='shops.count', read_only=True)
+    shops_count = serializers.IntegerField(source='shops.count',
+                                           read_only=True)
 
     class Meta:
         model = Category
@@ -96,7 +98,8 @@ class CategorySerializer(serializers.ModelSerializer):
 
 class ProductSerializer(serializers.ModelSerializer):
     """Сериализатор для продукта"""
-    category_name = serializers.CharField(source='category.name', read_only=True)
+    category_name = serializers.CharField(source='category.name',
+                                          read_only=True)
 
     class Meta:
         model = Product
@@ -114,7 +117,8 @@ class ParameterSerializer(serializers.ModelSerializer):
 
 class ProductParameterSerializer(serializers.ModelSerializer):
     """Сериализатор для параметра продукта"""
-    parameter_name = serializers.CharField(source='parameter.name', read_only=True)
+    parameter_name = serializers.CharField(source='parameter.name',
+                                           read_only=True)
 
     class Meta:
         model = ProductParameter
@@ -127,12 +131,22 @@ class ProductInfoSerializer(serializers.ModelSerializer):
     shop_name = serializers.CharField(source='shop.name', read_only=True)
     parameters = ProductParameterSerializer(many=True, read_only=True)
 
+    parameters_dict = serializers.SerializerMethodField()
+
+    def get_parameters_dict(self, obj):
+        """Возвращает параметры в виде словаря {название: значение}"""
+        parameters = {}
+        for param in obj.product_parameters.all():
+            parameters[param.parameter.name] = param.value
+        return parameters
+
     class Meta:
         model = ProductInfo
         fields = [
             'id', 'product', 'product_name', 'external_id',
             'full_name', 'shop', 'shop_name', 'quantity',
-            'retail_price', 'wholesale_price', 'parameters'
+            'retail_price', 'wholesale_price', 'sell_up_to',
+            'parameters', 'parameters_dict'
         ]
 
 
@@ -152,10 +166,338 @@ class ProductSearchSerializer(serializers.Serializer):
 
         if min_price and max_price and min_price > max_price:
             raise serializers.ValidationError({
-                'min_price': 'Минимальная цена не может быть больше максимальной'
+                'min_price': 'Минимальная цена не может быть '
+                             'больше максимальной'
             })
 
         return data
+
+
+class ContactSerializer(serializers.ModelSerializer):
+    """Сериализатор для контактов пользователя"""
+
+    class Meta:
+        model = Contact
+        fields = ['id', 'city', 'street', 'house', 'structure', 'apartment']
+        read_only_fields = ['id']
+
+    def create(self, validated_data):
+        """Создание контакта"""
+        # user будет добавлен из представления
+        return Contact.objects.create(**validated_data)
+
+    def update(self, instance, validated_data):
+        """Обновление контакта"""
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        return instance
+
+
+class ContactListSerializer(serializers.ModelSerializer):
+    """Сериализатор для списка контактов"""
+
+    class Meta:
+        model = Contact
+        fields = ['id', 'city', 'street', 'house', 'structure', 'apartment']
+
+
+class OrderItemSerializer(serializers.ModelSerializer):
+    """Сериализатор для товара в корзине"""
+    product_name = serializers.CharField(source='product.product.name',
+                                         read_only=True)
+    full_name = serializers.CharField(source='product.full_name',
+                                      read_only=True)
+    shop_name = serializers.CharField(source='product.shop.name',
+                                      read_only=True)
+    retail_price = serializers.IntegerField(source='product.retail_price',
+                                            read_only=True)
+    item_total = serializers.SerializerMethodField()
+    external_id = serializers.IntegerField(source='product.external_id',
+                                           read_only=True)
+    max_available = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OrderItem
+        fields = [
+            'id', 'product', 'product_name', 'full_name', 'shop_name',
+            'external_id', 'retail_price', 'quantity', 'item_total',
+            'max_available'
+        ]
+
+    def get_item_total(self, obj):
+        """Рассчитывает стоимость товара в корзине"""
+        return obj.quantity * obj.product.retail_price
+
+    def get_max_available(self, obj):
+        """Возвращает максимально доступное количество товара"""
+        return obj.product.get_available_quantity()
+
+
+class OrderSerializer(serializers.ModelSerializer):
+    """Сериализатор для заказа (корзины)"""
+    order_items = OrderItemSerializer(many=True, read_only=True)
+    contact_info = serializers.SerializerMethodField()
+    shop_totals = serializers.SerializerMethodField()
+    basket_total = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Order
+        fields = [
+            'id', 'status', 'dt', 'contact', 'contact_info',
+            'order_items', 'shop_totals', 'basket_total'
+        ]
+        read_only_fields = ['id', 'status', 'dt']
+
+    def get_contact_info(self, obj):
+        """Возвращает информацию о контакте"""
+        if obj.contact:
+            return {
+                'city': obj.contact.city,
+                'street': obj.contact.street,
+                'house': obj.contact.house,
+                'apartment': obj.contact.apartment
+            }
+        return None
+
+    def get_shop_totals(self, obj):
+        """Рассчитывает стоимость товаров по магазинам"""
+        shop_totals = {}
+        for item in obj.order_items.all():
+            shop_name = item.product.shop.name
+            item_total = item.quantity * item.product.retail_price
+            if shop_name not in shop_totals:
+                shop_totals[shop_name] = 0
+            shop_totals[shop_name] += item_total
+        return shop_totals
+
+    def get_basket_total(self, obj):
+        """Рассчитывает общую стоимость корзины"""
+        total = 0
+        for item in obj.order_items.all():
+            total += item.quantity * item.product.retail_price
+        return total
+
+
+class AddToCartSerializer(serializers.Serializer):
+    """Сериализатор для добавления товара в корзину"""
+    product_id = serializers.IntegerField()
+
+    def validate_product_id(self, value):
+        """Проверяет существование товара"""
+        try:
+            product = ProductInfo.objects.get(id=value)
+
+            # Проверка доступности товара
+            if not product.is_available():
+                raise serializers.ValidationError("Товар недоступен для заказа")
+
+            return value
+        except ProductInfo.DoesNotExist:
+            raise serializers.ValidationError("Товар не найден")
+
+
+class UpdateCartItemSerializer(serializers.ModelSerializer):
+    """Сериализатор для обновления количества товара в корзине"""
+
+    class Meta:
+        model = OrderItem
+        fields = ['quantity']
+
+    def validate_quantity(self, value):
+        """Проверяет количество товара"""
+        if value <= 0:
+            raise serializers.ValidationError("Количество должно быть больше 0")
+
+        # Проверка доступного количества
+        if hasattr(self, 'instance'):
+            max_available = self.instance.product.get_available_quantity()
+            if value > max_available:
+                raise serializers.ValidationError(
+                    f"Доступно только {max_available} единиц товара"
+                )
+
+        return value
+
+
+class OrderCreateSerializer(serializers.Serializer):
+    """Сериализатор для создания заказа из корзины"""
+    contact_id = serializers.IntegerField(required=True)
+
+    def validate_contact_id(self, value):
+        """Проверяет, что контакт принадлежит пользователю"""
+        user = self.context['request'].user
+        try:
+            contact = Contact.objects.get(id=value, user=user)
+            return value
+        except Contact.DoesNotExist:
+            raise serializers.ValidationError("Контакт не найден или "
+                                              "не принадлежит вам")
+
+    def validate(self, data):
+        """Проверяет, что в корзине есть товары"""
+        user = self.context['request'].user
+
+        # Ищем корзину пользователя
+        basket = Order.objects.filter(
+            contact__user=user,
+            status='basket'
+        ).first()
+
+        if not basket or not basket.order_items.exists():
+            raise serializers.ValidationError(
+                {'detail': 'Корзина пуста. Добавьте товары перед '
+                           'оформлением заказа.'}
+            )
+
+        # Проверяем, что у пользователя есть телефон
+        try:
+            phone = Phone.objects.get(user=user)
+        except Phone.DoesNotExist:
+            raise serializers.ValidationError(
+                {'detail': 'Для оформления заказа необходимо указать '
+                           'номер телефона.'}
+            )
+
+        data['basket'] = basket
+        data['phone'] = phone
+        return data
+
+
+class OrderConfirmSerializer(serializers.Serializer):
+    """Сериализатор для подтверждения заказа"""
+    order_id = serializers.IntegerField(required=True)
+
+    def validate_order_id(self, value):
+        """Проверяет, что заказ принадлежит пользователю и имеет статус 'new'"""
+        user = self.context['request'].user
+        try:
+            order = Order.objects.get(id=value, contact__user=user)
+            if order.status != 'new':
+                raise serializers.ValidationError(
+                    f"Заказ имеет статус '{order.status}' "
+                    f"и не может быть подтвержден"
+                )
+            return value
+        except Order.DoesNotExist:
+            raise serializers.ValidationError("Заказ не найден или "
+                                              "не принадлежит вам")
+
+
+class OrderDetailSerializer(serializers.ModelSerializer):
+    """Сериализатор для детальной информации о заказе"""
+    order_items = OrderItemSerializer(many=True, read_only=True)
+    contact_info = ContactSerializer(source='contact', read_only=True)
+    phone = serializers.SerializerMethodField()
+    shop_totals = serializers.SerializerMethodField()
+    total_amount = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Order
+        fields = [
+            'id', 'status', 'dt', 'contact', 'contact_info',
+            'order_items', 'shop_totals', 'total_amount', 'phone'
+        ]
+        read_only_fields = ['id', 'status', 'dt']
+
+    def get_phone(self, obj):
+        """Возвращает телефон пользователя"""
+        try:
+            phone = Phone.objects.get(user=obj.contact.user)
+            return phone.phone
+        except Phone.DoesNotExist:
+            return None
+
+    def get_shop_totals(self, obj):
+        """Рассчитывает стоимость товаров по магазинам"""
+        shop_totals = {}
+        for item in obj.order_items.all():
+            shop_name = item.product.shop.name
+            item_total = item.quantity * item.product.retail_price
+            if shop_name not in shop_totals:
+                shop_totals[shop_name] = {
+                    'shop_name': shop_name,
+                    'total': 0,
+                    'items': []
+                }
+            shop_totals[shop_name]['total'] += item_total
+            shop_totals[shop_name]['items'].append({
+                'product_name': item.product.full_name,
+                'quantity': item.quantity,
+                'price': item.product.retail_price,
+                'item_total': item_total
+            })
+        return list(shop_totals.values())
+
+    def get_total_amount(self, obj):
+        """Рассчитывает общую стоимость заказа"""
+        total = 0
+        for item in obj.order_items.all():
+            total += item.quantity * item.product.retail_price
+        return total
+
+
+class OrderListSerializer(serializers.ModelSerializer):
+    """Сериализатор для списка заказов"""
+    total_amount = serializers.SerializerMethodField()
+    items_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Order
+        fields = ['id', 'status', 'dt', 'total_amount', 'items_count']
+        read_only_fields = ['id', 'status', 'dt']
+
+    def get_total_amount(self, obj):
+        """Рассчитывает общую стоимость заказа"""
+        total = 0
+        for item in obj.order_items.all():
+            total += item.quantity * item.product.retail_price
+        return total
+
+    def get_items_count(self, obj):
+        """Возвращает количество товаров в заказе"""
+        return obj.order_items.count()
+
+
+class PhoneSerializer(serializers.ModelSerializer):
+    """Сериализатор для телефона пользователя"""
+
+    class Meta:
+        model = Phone
+        fields = ['id', 'phone']
+        read_only_fields = ['id']
+
+    def validate_phone(self, value):
+        """Валидация номера телефона"""
+        # Убираем все нецифровые символы
+        cleaned_phone = ''.join(filter(str.isdigit, value))
+
+        # Проверяем длину (минимум 10 цифр для международного формата)
+        if len(cleaned_phone) < 10:
+            raise serializers.ValidationError("Номер телефона слишком короткий")
+
+        # Проверяем уникальность
+        if Phone.objects.filter(phone=cleaned_phone).exists():
+            raise serializers.ValidationError(
+                "Этот номер телефона уже используется")
+
+        return cleaned_phone
+
+    def create(self, validated_data):
+        """Создание телефона для пользователя"""
+        user = self.context['request'].user
+
+        # Удаляем старый телефон, если он есть
+        Phone.objects.filter(user=user).delete()
+
+        # Создаем новый телефон
+        return Phone.objects.create(user=user, **validated_data)
+
+    def update(self, instance, validated_data):
+        """Обновление телефона"""
+        instance.phone = validated_data.get('phone', instance.phone)
+        instance.save()
+        return instance
 
 
 # Сериализаторы для YAML импорта
@@ -217,12 +559,14 @@ class YAMLImportSerializer(serializers.Serializer):
         # Проверяем уникальность ID категорий
         category_ids = [cat['id'] for cat in data['categories']]
         if len(category_ids) != len(set(category_ids)):
-            raise serializers.ValidationError("ID категорий должны быть уникальными")
+            raise serializers.ValidationError(
+                "ID категорий должны быть уникальными")
 
         # Проверяем уникальность ID товаров
         product_ids = [product['id'] for product in data['goods']]
         if len(product_ids) != len(set(product_ids)):
-            raise serializers.ValidationError("ID товаров должны быть уникальными")
+            raise serializers.ValidationError(
+                "ID товаров должны быть уникальными")
 
         # Проверяем, что все категории товаров есть в списке категорий
         category_ids_set = set(category_ids)
@@ -234,7 +578,3 @@ class YAMLImportSerializer(serializers.Serializer):
                 )
 
         return data
-
-
-
-

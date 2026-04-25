@@ -52,8 +52,10 @@ class YAMLProcessor:
                     raise ValidationError(f'Товар #{i}: отсутствует "{key}"')
 
             # Проверка параметров (опционально)
-            if 'parameters' in item and not isinstance(item['parameters'], dict):
-                raise ValidationError(f'Товар #{i}: "parameters" должен быть словарем')
+            if 'parameters' in item and not isinstance(
+                    item['parameters'], dict):
+                raise ValidationError(f'Товар #{i}: "parameters" '
+                                      f'должен быть словарем')
 
     @staticmethod
     def parse_yaml(content):
@@ -121,7 +123,8 @@ class YAMLProcessor:
             # Получаем категорию из словаря
             category_id = item['category']
             if category_id not in category_map:
-                raise ValidationError(f"Категория с id={category_id} не найдена в загружаемых данных")
+                raise ValidationError(f"Категория с id={category_id} "
+                                      f"не найдена в загружаемых данных")
 
             category = category_map[category_id]
 
@@ -139,7 +142,8 @@ class YAMLProcessor:
                 shop=shop,
                 quantity=item['quantity'],
                 retail_price=item['retail_price'],
-                wholesale_price=item.get('wholesale_price', item['retail_price'])
+                wholesale_price=item.get('wholesale_price',
+                                         item['retail_price'])
             )
 
             # Обработка параметров товара
