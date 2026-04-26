@@ -500,6 +500,76 @@ class PhoneSerializer(serializers.ModelSerializer):
         return instance
 
 
+class ShopPermissionSerializer(serializers.ModelSerializer):
+    """Сериализатор для изменения разрешения на заказы (permissions_order)"""
+    class Meta:
+        model = Shop
+        fields = ['permissions_order']
+        extra_kwargs = {
+            'permissions_order': {'required': True}
+        }
+
+
+class ShopOrderItemSerializer(serializers.ModelSerializer):
+    """Сериализатор для товаров в заказе"""
+    product_name = serializers.CharField(source='product.full_name',
+                                         read_only=True)
+    shop_name = serializers.CharField(source='product.shop.name',
+                                      read_only=True)
+    retail_price = serializers.IntegerField(source='product.retail_price',
+                                            read_only=True)
+    total_price = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OrderItem
+        fields = ['product_name', 'shop_name', 'quantity', 'retail_price',
+                  'total_price']
+
+    def get_total_price(self, obj):
+        return obj.quantity * obj.product.retail_price
+
+class ShopOrderListSerializer(serializers.ModelSerializer):
+    """Сериализатор для списка заказов с товарами
+    только из магазинов владельца"""
+    order_items = serializers.SerializerMethodField()
+    total_sum = serializers.SerializerMethodField()
+    contact_info = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Order
+        fields = ['id', 'dt', 'status', 'order_items', 'total_sum',
+                  'contact_info']
+        read_only_fields = fields
+
+    def get_order_items(self, obj):
+        # Получаем список ID магазинов владельца из контекста
+        user_shop_ids = self.context.get('user_shop_ids', [])
+        # Фильтруем товары заказа только по магазинам владельца
+        filtered_items = obj.order_items.filter(product__shop__in=user_shop_ids)
+        serializer = ShopOrderItemSerializer(filtered_items, many=True,
+                                             context=self.context)
+        return serializer.data
+
+    def get_total_sum(self, obj):
+        user_shop_ids = self.context.get('user_shop_ids', [])
+        return sum(
+            item.quantity * item.product.retail_price
+            for item in obj.order_items.filter(product__shop__in=user_shop_ids)
+        )
+
+    def get_contact_info(self, obj):
+        contact = obj.contact
+        return {
+            'city': contact.city,
+            'street': contact.street,
+            'house': contact.house,
+            'structure': contact.structure,
+            'apartment': contact.apartment,
+            'user_name': f"{contact.user.first_name} {contact.user.last_name}",
+            'user_email': contact.user.email,
+        }
+
+
 # Сериализаторы для YAML импорта
 class YAMLCategorySerializer(serializers.Serializer):
     """Сериализатор для категории из YAML"""

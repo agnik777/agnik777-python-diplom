@@ -1,34 +1,55 @@
 # views.py
 import yaml
-from datetime import timedelta, datetime
+from datetime import timedelta
 
 from django.http import JsonResponse, Http404
 from django.utils import timezone
+from django.db.models import Q
+from django.core.mail import send_mail
+from django.core.exceptions import ValidationError
+from django.conf import settings
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.views import APIView
-from .models import (Shop, ConfirmEmailToken, ProductInfo, Order, Contact,
-                     OrderItem, Phone)
-from requests.exceptions import RequestException
-from rest_framework import generics, status, filters, permissions
-from rest_framework.authtoken.models import Token
+from rest_framework import generics, status, permissions
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from .permissions import IsShopOwner
+from rest_framework.authtoken.models import Token
+from requests.exceptions import RequestException
+
+from .models import (
+    Shop, ConfirmEmailToken, ProductInfo, Order, Contact, OrderItem,
+    Phone
+)
 from .serializers import (
     YAMLImportSerializer, UserRegistrationSerializer, UserLoginSerializer,
     ShopSerializer, ShopCategorySerializer, ProductInfoSerializer,
     ProductSearchSerializer, OrderSerializer, AddToCartSerializer,
     OrderItemSerializer, UpdateCartItemSerializer, ContactSerializer,
-    ContactListSerializer, PhoneSerializer, OrderCreateSerializer,
-    OrderDetailSerializer, OrderConfirmSerializer, OrderListSerializer
+    PhoneSerializer, OrderCreateSerializer, OrderDetailSerializer,
+    OrderConfirmSerializer, OrderListSerializer, ShopPermissionSerializer,
+    ShopOrderListSerializer
 )
 from .utils import ProductUtils, OrderUtils
 from .yaml_processor import YAMLProcessor
 from .file_loader import FileLoader
-from django.core.mail import send_mail
-from django.core.exceptions import ValidationError
-from django.conf import settings
-from django.db.models import Q
+from .permissions import IsShopOwner
+
+
+class BaseUserDataView(generics.GenericAPIView):
+    """
+    Базовый класс для API, работающих с личными данными пользователя
+    (телефон, контакты). Проверяет права доступа.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        """Проверяем, что пользователь - покупатель"""
+        if self.request.user.type != 'buyer':
+            self.permission_denied(
+                self.request,
+                message="Только покупатели могут работать с данными"
+            )
+        return super().get_permissions()
 
 
 class UserRegistrationView(generics.CreateAPIView):
@@ -74,7 +95,7 @@ class ConfirmEmailView(APIView):
                 )
             user = token.user
             user.is_active = True
-            user.save(using=user._state.db)  # Явно указываем базу, как в UserManager
+            user.save(using=user._state.db)  # Явно указываем базу
             token.delete()
             return Response(
                 {'detail': 'Email успешно подтверждён.'},
@@ -116,6 +137,35 @@ class UserLoginView(generics.GenericAPIView):
             'user_id': user.pk,
             'email': user.email
         }, status=status.HTTP_200_OK)
+
+
+class LogoutView(APIView):
+    """
+    API для выхода пользователя из системы (удаление токена).
+    URL: /api/logout/
+    Метод: POST
+    """
+    # Доступ только для аутентифицированных пользователей
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        """
+        Обрабатывает запрос на выход.
+        Удаляет токен аутентификации пользователя, делая его недействительным.
+        """
+        try:
+            # Получаем и удаляем токен пользователя
+            request.user.auth_token.delete()
+            return Response(
+                {"detail": "Вы успешно вышли из системы."},
+                status=status.HTTP_200_OK
+            )
+        except (AttributeError, Token.DoesNotExist):
+            # Если что-то пошло не так (например, у пользователя нет токена)
+            return Response(
+                {"detail": "Ошибка при выходе из системы."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class PartnerUpdate(APIView):
@@ -300,7 +350,7 @@ class ProductSearchView(generics.ListAPIView):
         queryset = self.apply_filters(queryset, data)
 
         # Фильтруем просроченные товары
-        queryset = self.exclude_expired_products(queryset)
+        queryset = ProductUtils.exclude_expired_products(queryset)
 
         # Фильтр по наличию
         if data.get('in_stock_only'):
@@ -335,56 +385,6 @@ class ProductSearchView(generics.ListAPIView):
 
         return queryset
 
-    def exclude_expired_products(self, queryset):
-        """
-        Исключает просроченные товары.
-        Обрабатывает поле sell_up_to в формате YYYY-mm-dd или dd.mm.YYYY
-        """
-        today = timezone.now().date()
-
-        # Создаем список для условий исключения
-        exclude_conditions = Q()
-
-        # Обрабатываем каждый товар
-        for product_info in queryset:
-            sell_up_to = product_info.sell_up_to
-
-            # Пропускаем пустые значения
-            if not sell_up_to or sell_up_to.strip() == '':
-                continue
-
-            try:
-                # Пробуем разные форматы даты
-                date_obj = None
-
-                # Формат YYYY-mm-dd
-                if '-' in sell_up_to and len(sell_up_to.split('-')[0]) == 4:
-                    try:
-                        date_obj = datetime.strptime(sell_up_to,
-                                                     '%Y-%m-%d').date()
-                    except ValueError:
-                        pass
-
-                # Формат dd.mm.YYYY
-                if not date_obj and '.' in sell_up_to:
-                    try:
-                        date_obj = datetime.strptime(sell_up_to,
-                                                     '%d.%m.%Y').date()
-                    except ValueError:
-                        pass
-
-                # Если дата определена и просрочена,
-                # добавляем в условия исключения
-                if date_obj and date_obj < today:
-                    exclude_conditions |= Q(id=product_info.id)
-
-            except (ValueError, AttributeError):
-                # Если формат даты некорректный, пропускаем этот товар
-                continue
-
-        # Исключаем просроченные товары
-        return queryset.exclude(exclude_conditions)
-
     def list(self, request, *args, **kwargs):
         """Переопределяем для добавления метаданных"""
         queryset = self.filter_queryset(self.get_queryset())
@@ -398,24 +398,25 @@ class ProductSearchView(generics.ListAPIView):
         return Response(serializer.data)
 
 
-class CartView(generics.GenericAPIView):
+class ProductDetailView(generics.RetrieveAPIView):
+    """
+    API для получения детальной информации о товаре
+    GET /api/products/{id}/
+    """
+    serializer_class = ProductInfoSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def get_queryset(self):
+        """Используем утилиту для получения доступных товаров с оптимизацией."""
+        return ProductUtils.get_available_products_queryset()
+
+
+class CartView(BaseUserDataView):
     """
     API для работы с корзиной
     GET: Просмотр содержимого корзины
     POST: Добавление товара в корзину
     """
-    permission_classes = [IsAuthenticated]
-
-    def get_permissions(self):
-        """Проверяем, что пользователь - покупатель"""
-        if self.request.method in ['GET', 'POST', 'PUT', 'DELETE']:
-            if self.request.user.type != 'buyer':
-                self.permission_denied(
-                    self.request,
-                    message="Только покупатели могут работать с корзиной"
-                )
-        return super().get_permissions()
-
     def get_basket_order(self, user):
         """Получает или создает корзину пользователя"""
         # Ищем активную корзину
@@ -517,22 +518,12 @@ class CartView(generics.GenericAPIView):
         }, status=status.HTTP_200_OK)
 
 
-class CartItemDetailView(generics.GenericAPIView):
+class CartItemDetailView(BaseUserDataView):
     """
     API для работы с конкретным товаром в корзине
     PUT: Изменение количества товара
     DELETE: Удаление товара из корзины
     """
-    permission_classes = [IsAuthenticated]
-
-    def get_permissions(self):
-        """Проверяем, что пользователь - покупатель"""
-        if self.request.user.type != 'buyer':
-            self.permission_denied(
-                self.request,
-                message="Только покупатели могут работать с корзиной"
-            )
-        return super().get_permissions()
 
     def get_object(self, item_id):
         """Получает товар из корзины пользователя"""
@@ -584,45 +575,6 @@ class CartItemDetailView(generics.GenericAPIView):
             {'message': 'Товар удален из корзины'},
             status=status.HTTP_200_OK
         )
-
-
-class ProductDetailView(generics.RetrieveAPIView):
-    """
-    API для получения детальной информации о товаре
-    GET /api/products/{id}/
-    """
-    serializer_class = ProductInfoSerializer
-    permission_classes = [permissions.AllowAny]
-
-    def get_queryset(self):
-        """Оптимизированный запрос с предзагрузкой связанных данных"""
-        queryset = ProductUtils.get_available_products_queryset()
-
-        # Оптимизация запросов
-        queryset = queryset.select_related(
-            'product',
-            'shop',
-            'product__category'
-        ).prefetch_related(
-            'product_parameters__parameter'
-        )
-
-        return queryset
-
-    def get_queryset(self):
-        """Используем утилиту для получения доступных товаров"""
-        return ProductUtils.get_available_products_queryset()
-    
-    def get_object(self):
-        """Получаем товар с проверкой доступности"""
-        queryset = self.get_queryset()
-        obj = super().get_object()
-
-        # Дополнительная проверка (на всякий случай)
-        if not obj.is_available():
-            raise Http404("Товар недоступен")
-
-        return obj
 
 
 class OrderCreateView(generics.GenericAPIView):
@@ -815,3 +767,50 @@ class ContactDetailView(generics.RetrieveUpdateDestroyAPIView):
             {'detail': 'Контакт успешно удален'},
             status=status.HTTP_200_OK
         )
+
+
+class ShopPermissionUpdateView(APIView):
+    """API для владельца магазина:
+    изменение доступа к заказам (permissions_order)."""
+
+    permission_classes = [IsAuthenticated, IsShopOwner]
+
+    def patch(self, request, pk):
+        try:
+            shop = Shop.objects.get(pk=pk)
+            self.check_object_permissions(request, shop)  # Явная проверка
+
+            serializer = ShopPermissionSerializer(shop, data=request.data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            return Response(serializer.errors,
+                            status=status.HTTP_400_BAD_REQUEST)
+        except Shop.DoesNotExist:
+            return Response({'detail': 'Магазин не найден.'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+
+class ShopOrderListView(APIView):
+    """API для владельца магазина:
+    получение списка заказов с товарами из его магазинов."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user_shops = Shop.objects.filter(owner=request.user)
+
+        if not user_shops.exists():
+            return Response({'detail': 'У вас нет магазинов.'},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        user_shop_ids = list(user_shops.values_list('id', flat=True))
+
+        # Получаем заказы, где есть товары из магазинов пользователя
+        orders = Order.objects.filter(
+            order_items__product__shop__in=user_shops
+        ).distinct().order_by('-dt')
+
+        # Передаём ID магазинов владельца в контекст сериализатора
+        serializer = ShopOrderListSerializer(
+            orders, many=True, context={'user_shop_ids': user_shop_ids})
+        return Response(serializer.data, status=status.HTTP_200_OK)

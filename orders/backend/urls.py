@@ -4,7 +4,9 @@ from .views import (UserRegistrationView, ConfirmEmailView,
                     ShopCategoriesView, ProductSearchView, CartView,
                     CartItemDetailView, ProductDetailView, PhoneView,
                     ContactDetailView, OrderCreateView, OrderConfirmView,
-                    OrderListView, OrderDetailView, ContactViewSet)
+                    OrderListView, OrderDetailView, ContactViewSet,
+                    ShopPermissionUpdateView, ShopOrderListView,
+                    LogoutView)
 
 
 urlpatterns = [
@@ -12,6 +14,7 @@ urlpatterns = [
     path('confirm-email/<str:token_key>/', ConfirmEmailView.as_view(),
          name='confirm-email'),
     path('login/', UserLoginView.as_view(), name='login'),
+    path('logout/', LogoutView.as_view(), name='logout'),
     path('partner/update/', PartnerUpdate.as_view(),
          name='partner-update'),
     path('shops/', ShopListView.as_view(), name='shop-list'),
@@ -35,4 +38,9 @@ urlpatterns = [
     path('orders/', OrderListView.as_view(), name='order-list'),
     path('orders/<int:pk>/', OrderDetailView.as_view(),
          name='order-detail'),
+    path('shops/<int:pk>/permission/',
+         ShopPermissionUpdateView.as_view(),
+         name='shop-permission-update'),
+    path('shops/orders/', ShopOrderListView.as_view(),
+         name='shop-order-list'),
 ]
