@@ -1,3 +1,4 @@
+# backend/urls.py
 from django.urls import path
 from .views import (UserRegistrationView, ConfirmEmailView,
                     UserLoginView, PartnerUpdate, ShopListView,

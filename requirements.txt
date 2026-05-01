@@ -6,3 +6,6 @@ ujson~=5.9.0
 pyyaml~=6.0.3
 django-rest-passwordreset>=1.5.0
 python-dotenv==1.2.2
+dj-database-url==3.1.2
+drf-spectacular==0.29.0
+drf-spectacular[sidecar]

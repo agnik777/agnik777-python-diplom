@@ -1,4 +1,4 @@
-# views.py
+# backend/views.py
 import yaml
 from datetime import timedelta
 
@@ -33,6 +33,10 @@ from .utils import ProductUtils, OrderUtils
 from .yaml_processor import YAMLProcessor
 from .file_loader import FileLoader
 from .permissions import IsShopOwner
+from .throttles import (
+    RegisterThrottle, LoginThrottle,
+    ConfirmEmailThrottle, PartnerUpdateThrottle,
+)
 
 
 class BaseUserDataView(generics.GenericAPIView):
@@ -44,17 +48,19 @@ class BaseUserDataView(generics.GenericAPIView):
 
     def get_permissions(self):
         """Проверяем, что пользователь - покупатель"""
-        if self.request.user.type != 'buyer':
-            self.permission_denied(
-                self.request,
-                message="Только покупатели могут работать с данными"
-            )
+        if self.request.user.is_authenticated and hasattr(self.request.user, 'type'):
+            if self.request.user.type != 'buyer':
+                self.permission_denied(
+                    self.request,
+                    message="Только покупатели могут работать с данными"
+                )
         return super().get_permissions()
 
 
 class UserRegistrationView(generics.CreateAPIView):
     """Регистрация нового пользователя"""
     serializer_class = UserRegistrationSerializer
+    throttle_classes = [RegisterThrottle]
 
     def perform_create(self, serializer):
         user = serializer.save()
@@ -84,6 +90,8 @@ class UserRegistrationView(generics.CreateAPIView):
 
 class ConfirmEmailView(APIView):
     """Подтверждение email по токену"""
+    throttle_classes = [ConfirmEmailThrottle]
+
     def get(self, request, token_key):
         try:
             token = ConfirmEmailToken.objects.get(key=token_key)
@@ -111,6 +119,7 @@ class ConfirmEmailView(APIView):
 class UserLoginView(generics.GenericAPIView):
     """Вход пользователя в систему"""
     serializer_class = UserLoginSerializer
+    throttle_classes = [LoginThrottle]
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -171,6 +180,7 @@ class LogoutView(APIView):
 class PartnerUpdate(APIView):
     """Класс для обновления прайса от поставщика"""
     permission_classes = [IsAuthenticated, IsShopOwner]
+    throttle_classes = [PartnerUpdateThrottle]
 
     def post(self, request, *args, **kwargs):
         """Обработка POST запроса для обновления прайса"""

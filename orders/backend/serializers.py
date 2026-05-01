@@ -9,6 +9,7 @@ from .models import (Shop, Category, Product, ProductInfo, Parameter,
 User = get_user_model()
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
+    """Сериализатор для регистрации пользователя"""
     password = serializers.CharField(write_only=True)
 
     class Meta:
@@ -26,6 +27,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
 
 
 class UserLoginSerializer(serializers.Serializer):
+    """Сериализатор для логирования"""
     email = serializers.EmailField()
     password = serializers.CharField(
         trim_whitespace=False,
@@ -57,6 +59,7 @@ class UserLoginSerializer(serializers.Serializer):
 
 
 class CategoryListSerializer(serializers.ModelSerializer):
+    """Сериализатор списка категорий"""
     class Meta:
         model = Category
         fields = ['id', 'name']
@@ -129,7 +132,6 @@ class ProductInfoSerializer(serializers.ModelSerializer):
     """Сериализатор для информации о продукте"""
     product_name = serializers.CharField(source='product.name', read_only=True)
     shop_name = serializers.CharField(source='shop.name', read_only=True)
-    parameters = ProductParameterSerializer(many=True, read_only=True)
 
     parameters_dict = serializers.SerializerMethodField()
 
@@ -146,7 +148,7 @@ class ProductInfoSerializer(serializers.ModelSerializer):
             'id', 'product', 'product_name', 'external_id',
             'full_name', 'shop', 'shop_name', 'quantity',
             'retail_price', 'wholesale_price', 'sell_up_to',
-            'parameters', 'parameters_dict'
+            'parameters_dict'
         ]
 
 
