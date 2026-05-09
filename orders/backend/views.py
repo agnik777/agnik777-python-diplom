@@ -8,11 +8,12 @@ from django.db.models import Q
 from django.core.mail import send_mail
 from django.core.exceptions import ValidationError
 from django.conf import settings
+
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.views import APIView
 from rest_framework import generics, status, permissions
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.authtoken.models import Token
 from requests.exceptions import RequestException
 
@@ -39,6 +40,55 @@ from .throttles import (
 )
 
 
+class SocialAuthCompleteView(APIView):
+    """
+    View, которая возвращает токен после успешной авторизации через соцсеть.
+    URL: /api/social-auth/complete/
+    Метод: GET
+    """
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        token_key = request.session.get('social_auth_token')
+
+        if not token_key:
+            # Пробуем найти токен по пользователю
+            if request.user.is_authenticated:
+                token, _ = Token.objects.get_or_create(user=request.user)
+                token_key = token.key
+            else:
+                return Response(
+                    {'error': 'Токен не найден. Авторизация не завершена.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        # Очищаем сессию
+        if 'social_auth_token' in request.session:
+            del request.session['social_auth_token']
+
+        return Response({
+            'token': token_key,
+            'user_id': request.user.pk if request.user.is_authenticated else None,
+            'email': request.user.email if request.user.is_authenticated else None,
+            'detail': 'Авторизация через Яндекс успешна.'
+        }, status=status.HTTP_200_OK)
+
+
+class SocialAuthErrorView(APIView):
+    """
+    View для отображения ошибки авторизации.
+    URL: /api/social-auth/error/
+    """
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        error = request.GET.get('error', 'Неизвестная ошибка')
+        return Response(
+            {'error': f'Ошибка авторизации: {error}'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+
 class BaseUserDataView(generics.GenericAPIView):
     """
     Базовый класс для API, работающих с личными данными пользователя
@@ -48,7 +98,8 @@ class BaseUserDataView(generics.GenericAPIView):
 
     def get_permissions(self):
         """Проверяем, что пользователь - покупатель"""
-        if self.request.user.is_authenticated and hasattr(self.request.user, 'type'):
+        if self.request.user.is_authenticated and hasattr(self.request.user,
+                                                          'type'):
             if self.request.user.type != 'buyer':
                 self.permission_denied(
                     self.request,
@@ -136,7 +187,7 @@ class UserLoginView(generics.GenericAPIView):
         # Обновляем логин-статистику
         user.last_login_time = timezone.now()
         user.login_count += 1
-        user.save()
+        user.save(update_fields=['last_login_time', 'login_count'])
 
         # Получаем или создаем токен для пользователя
         token, created = Token.objects.get_or_create(user=user)

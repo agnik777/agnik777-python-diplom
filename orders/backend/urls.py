@@ -1,5 +1,5 @@
 # backend/urls.py
-from django.urls import path
+from django.urls import path, include
 from .views import (UserRegistrationView, ConfirmEmailView,
                     UserLoginView, PartnerUpdate, ShopListView,
                     ShopCategoriesView, ProductSearchView, CartView,
@@ -7,7 +7,8 @@ from .views import (UserRegistrationView, ConfirmEmailView,
                     ContactDetailView, OrderCreateView, OrderConfirmView,
                     OrderListView, OrderDetailView, ContactViewSet,
                     ShopPermissionUpdateView, ShopOrderListView,
-                    LogoutView)
+                    LogoutView,)
+from .views_debug import SentryDebugView
 
 
 urlpatterns = [
@@ -44,4 +45,15 @@ urlpatterns = [
          name='shop-permission-update'),
     path('shops/orders/', ShopOrderListView.as_view(),
          name='shop-order-list'),
+    path('debug/sentry/', SentryDebugView.as_view(),
+         name='debug-sentry'),
+]
+
+from .views import SocialAuthCompleteView, SocialAuthErrorView
+
+urlpatterns += [
+    path('social-auth/', include('social_django.urls',
+                                     namespace='social')),
+    path('social-auth/complete/', SocialAuthCompleteView.as_view(), name='social-complete'),
+    path('social-auth/error/', SocialAuthErrorView.as_view(), name='social-error'),
 ]

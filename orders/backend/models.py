@@ -1,4 +1,4 @@
-# models.py
+# backend/models.py
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractUser, Group, Permission
 from django.contrib.auth.validators import UnicodeUsernameValidator
@@ -65,6 +65,17 @@ class UserManager(BaseUserManager):
         return  self._create_user(email, password, **extra_fields)
 
 
+def user_avatar_path(instance, filename):
+    """
+    Генерирует путь для сохранения аватара пользователя.
+    Формат: avatars/user_{id}/avatar_{filename}
+    """
+    import uuid
+    ext = filename.split('.')[-1] if '.' in filename else 'jpg'
+    unique_name = f'{uuid.uuid4().hex}.{ext}'
+    return f'avatars/user_{instance.id}/{unique_name}'
+
+
 class User(AbstractUser):
     """
     Стандартная модель пользователей
@@ -78,6 +89,8 @@ class User(AbstractUser):
     username_validator = UnicodeUsernameValidator()
     username = models.CharField(
         _('username'), max_length=150,
+        unique=False,
+        blank=True,
         help_text=_('Required. 150 characters or fewer. '
                     'Letters, digits and @/./+/-/_ only.'),
         validators=[username_validator],
@@ -94,7 +107,21 @@ class User(AbstractUser):
     type = models.CharField(verbose_name='Тип пользователя',
                            choices=USER_TYPE_CHOICES, max_length=5,
                            default='buyer')
-
+    avatar = models.ImageField(
+        verbose_name='Аватар',
+        upload_to=user_avatar_path,
+        blank=True,
+        null=True,
+        help_text=_('Изображение аватара пользователя. '
+                    'Рекомендуемый размер: 200x200 пикселей.'),
+    )
+    avatar_url = models.URLField(
+        verbose_name='URL аватара',
+        max_length=500,
+        blank=True,
+        null=True,
+        help_text=_('Ссылка на аватар из социальной сети'),
+    )
     last_login_time = models.DateTimeField(
         verbose_name='Время последнего входа',
         null=True,
@@ -123,7 +150,19 @@ class User(AbstractUser):
     )
 
     def __str__(self):
-        return f'{self.first_name} {self.last_name}'
+        return f'{self.first_name} {self.last_name}'.strip() or self.email
+
+    @property
+    def avatar_display_url(self):
+        """
+        Возвращает URL для отображения аватара.
+        Приоритет: загруженный файл > URL из соцсети > заглушка.
+        """
+        if self.avatar:
+            return self.avatar.url
+        if self.avatar_url:
+            return self.avatar_url
+        return None
 
     class Meta:
         verbose_name = 'Пользователь'

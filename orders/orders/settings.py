@@ -1,4 +1,4 @@
-# settings.py
+# orders/settings.py
 """
 Django settings for orders project.
 
@@ -16,6 +16,14 @@ from dotenv import load_dotenv
 from pathlib import Path
 import dj_database_url
 
+import sentry_sdk
+from sentry_sdk.integrations.django import DjangoIntegration
+# from sentry_sdk.integrations.redis import RedisIntegration
+from sentry_sdk.integrations.logging import LoggingIntegration
+from django.http import Http404
+from django.core.exceptions import PermissionDenied
+from rest_framework.exceptions import Throttled
+
 
 load_dotenv()
 
@@ -30,14 +38,16 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG')
+DEBUG = os.getenv('DEBUG', 'False').lower() in ('true', '1', 'yes')
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '*').split(',')
 
 
 # Application definition
 
 INSTALLED_APPS = [
+    'jet.dashboard',
+    'jet',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -50,6 +60,7 @@ INSTALLED_APPS = [
     'backend',
     'drf_spectacular',
     'drf_spectacular_sidecar',
+    'social_django',
 ]
 
 MIDDLEWARE = [
@@ -81,10 +92,6 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'orders.wsgi.application'
 
-
-# Database
-# https://docs.djangoproject.com/en/5.2/ref/settings/#databases
-
 DATABASES = {
     'default': dj_database_url.config(
         default='sqlite:///db.sqlite3',  # fallback, если переменной нет
@@ -92,7 +99,6 @@ DATABASES = {
         ssl_require=False,               # True для продакшена
     )
 }
-
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
@@ -116,31 +122,28 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
-
-TIME_ZONE = 'UTC'
-
+LANGUAGE_CODE = 'ru-RU'
+TIME_ZONE = 'Europe/Moscow'
 USE_I18N = True
-
 USE_TZ = True
-
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 
 AUTH_USER_MODEL = 'backend.User'
 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-
 EMAIL_HOST = 'smtp.mail.ru'
-
 EMAIL_HOST_USER = os.getenv('MY_EMAIL')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_PASSWORD')
 EMAIL_PORT = 465
 EMAIL_USE_SSL = True
-# EMAIL_USE_TLS = True
 SERVER_EMAIL = os.getenv('MY_EMAIL')
 DEFAULT_FROM_EMAIL = os.getenv('MY_EMAIL')
 
@@ -151,11 +154,13 @@ else:
     BACKEND_URL = 'https://api.your-domain.com'  # ваш бэкенд
     FRONTEND_URL = 'https://your-domain.com'  # ваш фронтенд
 
-
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.TokenAuthentication',
         'rest_framework.authentication.SessionAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.AllowAny',
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
@@ -180,14 +185,13 @@ REST_FRAMEWORK = {
 
 
 SPECTACULAR_SETTINGS = {
-    'SWAGGER_UI_DIST': 'SIDECAR',  # shorthand to use the sidecar instead
+    'SWAGGER_UI_DIST': 'SIDECAR',
     'SWAGGER_UI_FAVICON_HREF': 'SIDECAR',
     'REDOC_DIST': 'SIDECAR',
-    'TITLE': 'Your Project API',
-    'DESCRIPTION': 'Your project description',
+    'TITLE': 'Orders API',
+    'DESCRIPTION': 'API для управления заказами',
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
-    # OTHER SETTINGS
 }
 
 
@@ -222,3 +226,165 @@ YAML_ALLOWED_MIME_TYPES = [
 
 # Настройки для парсинга YAML
 YAML_LOADER = 'yaml.SafeLoader'  # Безопасный загрузчик
+
+# Настройки social-auth
+AUTHENTICATION_BACKENDS = (
+    'social_core.backends.yandex.YandexOAuth2',
+    'django.contrib.auth.backends.ModelBackend',
+)
+
+# Яндекс OAuth
+SOCIAL_AUTH_YANDEX_OAUTH2_KEY = os.getenv('YANDEX_APP_ID', '')
+SOCIAL_AUTH_YANDEX_OAUTH2_SECRET = os.getenv('YANDEX_APP_SECRET', '')
+SOCIAL_AUTH_YANDEX_OAUTH2_SCOPE = ['login:email', 'login:avatar', 'login:info']
+
+# Настройки полей пользователя
+SOCIAL_AUTH_USER_FIELDS = ['email', 'first_name', 'last_name', 'username']
+SOCIAL_AUTH_EMAIL_AS_USERNAME = True
+SOCIAL_AUTH_USERNAME_IS_FULL_EMAIL = True
+
+# Отключаем создание username — используем email
+SOCIAL_AUTH_PROTECTED_USER_FIELDS = ['email', 'first_name', 'last_name']
+SOCIAL_AUTH_SLUGIFY_USERNAMES = True
+
+# Адрес, куда перенаправить после успешного входа (без фронтенда — отдаём JSON)
+SOCIAL_AUTH_LOGIN_REDIRECT_URL = '/api/social-auth/complete/'
+SOCIAL_AUTH_LOGIN_ERROR_URL = '/api/social-auth/error/'
+
+# Pipeline — цепочка обработки после авторизации
+SOCIAL_AUTH_PIPELINE = (
+    'social_core.pipeline.social_auth.social_details',
+    'social_core.pipeline.social_auth.social_uid',
+    'social_core.pipeline.social_auth.auth_allowed',
+    'social_core.pipeline.social_auth.social_user',
+    'social_core.pipeline.user.get_username',
+    'social_core.pipeline.user.create_user',
+    'social_core.pipeline.social_auth.associate_user',
+    'social_core.pipeline.social_auth.load_extra_data',
+    'social_core.pipeline.user.user_details',
+    'backend.social_pipeline.save_yandex_avatar',
+)
+
+# URL-префикс для social-auth
+SOCIAL_AUTH_URL_NAMESPACE = 'social'
+LOGIN_URL = '/api/social-auth/login/yandex-oauth2/'
+
+
+# Django JET — настройки админ-панели
+JET_DEFAULT_THEME = 'light-gray'
+
+JET_SIDE_MENU_COMPACT = True
+JET_CHANGE_FORM_SIBLING_LINKS = True
+JET_CHANGE_FORM_SIBLING_LINKS_DEPTH = 2
+
+JET_SORTABLE_LIST = True
+JET_FILTERS_DATE_RANGE_PICKER = True
+JET_SHOW_FULL_NAME = True
+
+# Кастомная панель управления (dashboard)
+JET_INDEX_DASHBOARD = 'orders.dashboard.CustomIndexDashboard'
+JET_APP_INDEX_DASHBOARD = 'orders.dashboard.CustomIndexDashboard'
+
+# Темы оформления
+JET_THEMES = [
+    {
+        'theme': 'default',
+        'color': '#47bac1',
+        'title': 'По умолчанию',
+    },
+    {
+        'theme': 'green',
+        'color': '#44b78b',
+        'title': 'Зелёная',
+    },
+    {
+        'theme': 'light',
+        'color': '#ffffff',
+        'title': 'Светлая',
+    },
+    {
+        'theme': 'dark',
+        'color': '#1a1a2e',
+        'title': 'Тёмная',
+    },
+    {
+        'theme': 'light-gray',
+        'color': '#f0f0f0',
+        'title': 'Светло-серая',
+    },
+]
+
+# Sentry — мониторинг ошибок
+SENTRY_DSN = os.getenv('SENTRY_DSN', '')
+SENTRY_ENVIRONMENT = 'development' if DEBUG else 'production'
+
+
+def _strip_sensitive_data(event, hint):
+    """Удаляем пароли, токены и ключи из данных перед отправкой в Sentry"""
+    if 'request' in event:
+        if 'data' in event['request']:
+            data = event['request']['data']
+            if isinstance(data, dict):
+                sensitive_fields = ['password', 'token', 'secret', 'api_key',
+                                    'access', 'refresh', 'csrfmiddlewaretoken']
+                for field in sensitive_fields:
+                    if field in data:
+                        data[field] = '***'
+
+        # Также чистим query string
+        if 'query_string' in event['request']:
+            # можно дополнительно обработать query parameters
+            pass
+
+    return event
+
+
+def _before_sentry_send(event, hint):
+    """
+    Фильтр событий перед отправкой в Sentry.
+    Позволяет отбрасывать неважные ошибки.
+    """
+    if 'exc_info' in hint:
+        exc_type, exc_value, tb = hint['exc_info']
+
+        if exc_type == Http404:
+            return None
+        if exc_type == PermissionDenied:
+            return None
+        if exc_type == Throttled:
+            return None
+
+    return event
+
+
+if SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+
+        integrations=[
+            DjangoIntegration(
+                transaction_style='url',
+                middleware_spans=True,
+            ),
+            # RedisIntegration(),
+            LoggingIntegration(
+                level=None,
+                event_level=None,
+            ),
+        ],
+
+        environment=SENTRY_ENVIRONMENT,
+        release='orders-api@1.0.0',
+
+        traces_sample_rate=1.0 if DEBUG else 0.2,
+        profiles_sample_rate=1.0 if DEBUG else 0.1,
+
+        send_default_pii=False,
+        max_breadcrumbs=50,
+
+        # ⬇️⬇️⬇️ Цепочка фильтров ⬇️⬇️⬇️
+        before_send=lambda event, hint: _strip_sensitive_data(
+            _before_sentry_send(event, hint),
+            hint
+        ),
+    )
