@@ -1,4 +1,4 @@
-# backend/social_pipeline.py
+# backend/pipeline.py
 """
 Кастомные шаги pipeline для social-auth.
 Сохраняем аватар из Яндекса, активируем пользователя, выдаём токен.

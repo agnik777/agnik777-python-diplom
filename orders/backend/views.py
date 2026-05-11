@@ -38,6 +38,11 @@ from .throttles import (
     RegisterThrottle, LoginThrottle,
     ConfirmEmailThrottle, PartnerUpdateThrottle,
 )
+from .tasks import (
+    send_confirmation_email_task, send_order_created_email_task,
+    send_all_shop_owner_emails_task, send_order_confirmed_email_task,
+    send_order_status_changed_email_task
+)
 
 
 class SocialAuthCompleteView(APIView):
@@ -116,27 +121,9 @@ class UserRegistrationView(generics.CreateAPIView):
     def perform_create(self, serializer):
         user = serializer.save()
         token = ConfirmEmailToken.objects.create(user=user)
-        self.send_confirmation_email(user, token.key)
 
-    def send_confirmation_email(self, user, token_key):
-        confirmation_url = f"{settings.BACKEND_URL}/api/confirm-email/{token_key}/"
-        message = f"""
-        Здравствуйте, {user.first_name}!
-
-        Для подтверждения регистрации перейдите по ссылке:
-        {confirmation_url}
-        
-        Ссылка действительна 24 часа.
-
-        Если вы не регистрировались, просто проигнорируйте это письмо.
-        """
-        send_mail(
-            subject='Подтверждение регистрации',
-            message=message,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-            fail_silently=False,
-        )
+        # используем Celery задачу
+        send_confirmation_email_task.delay(user.id, token.key)
 
 
 class ConfirmEmailView(APIView):
@@ -661,9 +648,11 @@ class OrderCreateView(generics.GenericAPIView):
             basket.contact = contact
             basket.save()
 
-            # Отправляем уведомления
-            OrderUtils.send_order_notifications(request.user, basket,
-                                                contact, phone)
+            # Отправляем письмо покупателю
+            send_order_created_email_task.delay(request.user.id, basket.id)
+
+            # Отправляем письма владельцам магазинов
+            send_all_shop_owner_emails_task.delay(basket.id)
 
             return Response({
                 'detail': 'Заказ успешно создан',
@@ -698,10 +687,16 @@ class OrderConfirmView(generics.GenericAPIView):
             order.status = 'confirmed'
             order.save()
 
-            # Отправляем уведомления
-            OrderUtils.send_order_confirmed_notifications(
-                request.user, order, previous_status
+            # Отправляем письмо о подтверждении
+            send_order_confirmed_email_task.delay(request.user.id, order.id)
+
+            # Отправляем письмо об изменении статуса
+            send_order_status_changed_email_task.delay(
+                request.user.id, order.id, previous_status
             )
+
+            # Отправляем письма владельцам магазинов
+            send_all_shop_owner_emails_task.delay(order.id)
 
             return Response({
                 'detail': 'Заказ успешно подтвержден',

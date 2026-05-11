@@ -42,7 +42,6 @@ DEBUG = os.getenv('DEBUG', 'False').lower() in ('true', '1', 'yes')
 
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '*').split(',')
 
-
 # Application definition
 
 INSTALLED_APPS = [
@@ -237,7 +236,9 @@ AUTHENTICATION_BACKENDS = (
 SOCIAL_AUTH_YANDEX_OAUTH2_KEY = os.getenv('YANDEX_APP_ID', '')
 SOCIAL_AUTH_YANDEX_OAUTH2_SECRET = os.getenv('YANDEX_APP_SECRET', '')
 SOCIAL_AUTH_YANDEX_OAUTH2_SCOPE = ['login:email', 'login:avatar', 'login:info']
+# SOCIAL_AUTH_YANDEX_OAUTH2_ENDPOINT = 'https://oauth.yandex.ru'
 
+# SOCIAL_AUTH_REDIRECT_IS_HTTPS = False
 # Настройки полей пользователя
 SOCIAL_AUTH_USER_FIELDS = ['email', 'first_name', 'last_name', 'username']
 SOCIAL_AUTH_EMAIL_AS_USERNAME = True
@@ -262,7 +263,7 @@ SOCIAL_AUTH_PIPELINE = (
     'social_core.pipeline.social_auth.associate_user',
     'social_core.pipeline.social_auth.load_extra_data',
     'social_core.pipeline.user.user_details',
-    'backend.social_pipeline.save_yandex_avatar',
+    'backend.pipeline.save_yandex_avatar',
 )
 
 # URL-префикс для social-auth
@@ -388,3 +389,61 @@ if SENTRY_DSN:
             hint
         ),
     )
+
+# ========== CELERY CONFIGURATION ==========
+
+# Брокер сообщений — Redis (локально или через переменную окружения)
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+
+# Бэкенд для хранения результатов выполнения задач
+CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+
+# Формат сериализации
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+
+# Часовой пояс для Celery
+CELERY_TIMEZONE = 'Europe/Moscow'
+CELERY_ENABLE_UTC = True
+
+# Настройка количества одновременных задач (воркеров)
+CELERY_WORKER_MAX_TASKS_PER_CHILD = 100
+
+# Поведение при падении задачи: повторять 3 раза с экспоненциальной задержкой
+CELERY_TASK_DEFAULT_RETRY_DELAY = 60        # 60 секунд до первого повтора
+CELERY_TASK_MAX_RETRIES = 3                 # максимум 3 повтора
+CELERY_TASK_ACKS_LATE = True                # подтверждение после выполнения
+CELERY_TASK_REJECT_ON_WORKER_LOST = True    # перезапуск при падении воркера
+
+# Настройка очередей (можно разделить задачи по важности)
+CELERY_TASK_DEFAULT_QUEUE = 'default'
+CELERY_TASK_QUEUES = {
+    'default': {
+        'exchange': 'default',
+        'routing_key': 'default',
+    },
+    'email': {                     # отдельная очередь для email
+        'exchange': 'email',
+        'routing_key': 'email',
+    },
+}
+
+# ========== CELERY BEAT SCHEDULE ==========
+
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    'cleanup-expired-tokens': {
+        'task': 'backend.tasks.cleanup_expired_tokens_task',
+        'schedule': crontab(hour=3, minute=0),  # Каждый день в 3:00
+        'options': {'queue': 'default'},
+    },
+    'cleanup-expired-baskets': {
+        'task': 'backend.tasks.cleanup_expired_baskets_task',
+        'schedule': crontab(hour=4, minute=0),  # Каждый день в 4:00
+        'options': {'queue': 'default'},
+    },
+}
+
+# ========== END CELERY BEAT SCHEDULE ==========
