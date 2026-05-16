@@ -15,6 +15,7 @@ from .models import (
     Order,
     OrderItem,
     ConfirmEmailToken,
+    ProductImage,
 )
 
 
@@ -51,6 +52,8 @@ class OrderItemInline(admin.TabularInline):
     verbose_name_plural = 'Товары в заказе'
 
 
+# --- Админ-панели ---
+
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
     list_display = (
@@ -62,6 +65,7 @@ class UserAdmin(admin.ModelAdmin):
     ordering = ('email',)
     readonly_fields = ('login_count', 'last_login_time', 'avatar_display')
     inlines = [ContactInline, PhoneInline]
+
     fieldsets = (
         (None, {
             'fields': ('email', 'password')
@@ -87,7 +91,7 @@ class UserAdmin(admin.ModelAdmin):
         url = obj.avatar_display_url
         if url:
             return format_html(
-                '<img src="{}" style="max-height: 100px; border-radius: 8px;" />',
+                '<img src="{}" style="max-height: 100px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);" />',
                 url
             )
         return '—'
@@ -124,9 +128,8 @@ class ProductAdmin(admin.ModelAdmin):
 @admin.register(ProductInfo)
 class ProductInfoAdmin(admin.ModelAdmin):
     list_display = (
-        'product', 'full_name', 'shop', 'external_id',
-        'quantity', 'retail_price', 'wholesale_price',
-        'sell_up_to', 'is_available'
+        'product', 'full_name', 'shop', 'external_id', 'quantity',
+        'retail_price', 'wholesale_price', 'sell_up_to', 'is_available'
     )
     list_filter = ('shop', 'product__category')
     search_fields = ('full_name', 'product__name')
@@ -151,6 +154,7 @@ class ProductParameterAdmin(admin.ModelAdmin):
     list_display = ('product_info', 'parameter', 'value')
     list_filter = ('parameter',)
     search_fields = ('product_info__full_name', 'parameter__name', 'value')
+    ordering = ('product_info',)
 
 
 @admin.register(Contact)
@@ -181,6 +185,7 @@ class OrderAdmin(admin.ModelAdmin):
 class OrderItemAdmin(admin.ModelAdmin):
     list_display = ('order', 'product', 'quantity')
     search_fields = ('order__id', 'product__full_name')
+    ordering = ('order',)
 
 
 @admin.register(ConfirmEmailToken)
@@ -189,3 +194,116 @@ class ConfirmEmailTokenAdmin(admin.ModelAdmin):
     search_fields = ('user__email', 'key')
     readonly_fields = ('key', 'created_at')
     ordering = ('-created_at',)
+
+
+@admin.register(ProductImage)
+class ProductImageAdmin(admin.ModelAdmin):
+    list_display = (
+        'image_preview',
+        'product_info',
+        'is_main',
+        'uploaded_at',
+        'id'
+    )
+    list_filter = (
+        'is_main',
+        'product_info__product__name',
+        'product_info__shop__name'
+    )
+    search_fields = (
+        'product_info__product__name',
+        'product_info__full_name',
+        'product_info__shop__name',
+        'id'
+    )
+    readonly_fields = (
+        'uploaded_at',
+        'original',
+        'preview',
+        'full_view',
+        'thumbnail_small',
+        'thumbnail_medium',
+        'thumbnail_large',
+        'alt_text',
+        'sort_order'
+    )
+    ordering = ('-uploaded_at',)
+
+    fieldsets = (
+        (None, {
+            'fields': ('product_info', 'original', 'is_main', 'uploaded_at',
+                       'alt_text', 'sort_order')
+        }),
+        ('Превью и миниатюры', {
+            'fields': (
+                'image_preview',
+                'thumbnail_small_preview',
+                'thumbnail_medium_preview',
+                'thumbnail_large_preview',
+                'preview',
+                'full_view',
+                'thumbnails_display'
+            ),
+            'classes': ('collapse',)
+        }),
+    )
+
+    # Метод для отображения изображения в списке
+    def image_preview(self, obj):
+        if obj.preview:
+            return format_html(
+                '<img src="{}" style="max-height: 60px; border-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,0.1);" />',
+                obj.preview.url
+            )
+        elif obj.original:
+            return format_html(
+                '<img src="{}" style="max-height: 60px; border-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,0.1);" />',
+                obj.original.url
+            )
+        return '—'
+    image_preview.short_description = 'Изображение'
+
+    # Метод для отображения миниатюры маленькой
+    def thumbnail_small_preview(self, obj):
+        if obj.thumbnail_small:
+            return format_html(
+                '<img src="{}" style="max-height: 40px; border-radius: 3px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);" />',
+                obj.thumbnail_small.url
+            )
+        return '—'
+    thumbnail_small_preview.short_description = 'Миниатюра (100x100)'
+
+    # Метод для отображения миниатюры средней
+    def thumbnail_medium_preview(self, obj):
+        if obj.thumbnail_medium:
+            return format_html(
+                '<img src="{}" style="max-height: 40px; border-radius: 3px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);" />',
+                obj.thumbnail_medium.url
+            )
+        return '—'
+    thumbnail_medium_preview.short_description = 'Миниатюра (300x300)'
+
+    # Метод для отображения миниатюры большой
+    def thumbnail_large_preview(self, obj):
+        if obj.thumbnail_large:
+            return format_html(
+                '<img src="{}" style="max-height: 40px; border-radius: 3px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);" />',
+                obj.thumbnail_large.url
+            )
+        return '—'
+    thumbnail_large_preview.short_description = 'Миниатюра (800x800)'
+
+    # Метод для отображения всех миниатюр в виде таблицы
+    def thumbnails_display(self, obj):
+        thumbs = obj.all_thumbnails
+        html = []
+        for key, url in thumbs.items():
+            if url:
+                html.append(
+                    f'<div style="margin: 4px 0; display: inline-block; vertical-align: top; text-align: center;">'
+                    f'<strong>{key}:</strong><br>'
+                    f'<img src="{url}" style="max-height: 40px; border-radius: 3px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);" />'
+                    f'</div>'
+                )
+        return format_html(''.join(html)) if html else '—'
+    thumbnails_display.short_description = 'Все миниатюры'

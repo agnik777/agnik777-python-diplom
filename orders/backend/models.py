@@ -1,15 +1,24 @@
 # backend/models.py
+import os
+import uuid
+import logging
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractUser, Group, Permission
 from django.contrib.auth.validators import UnicodeUsernameValidator
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
+from django.core.validators import FileExtensionValidator
 from django.utils.translation import gettext_lazy as _
 from django_rest_passwordreset.tokens import get_token_generator
+from imagekit.models import ImageSpecField, ProcessedImageField
+from imagekit.processors import ResizeToFill, ResizeToFit, SmartResize, Transpose
+from imagekit.cachefiles import ImageCacheFile
 
 from .utils import ProductUtils
 
+
+logger = logging.getLogger(__name__)
 
 STATE_CHOICES = (
     ('basket', 'Статус корзины'),
@@ -306,6 +315,177 @@ class ProductParameter(models.Model):
             models.UniqueConstraint(fields=['product_info', 'parameter'],
                                     name='unique_product_parameter'),
         ]
+
+
+def product_image_path(instance, filename):
+    """
+    Генерирует путь для сохранения изображения товара.
+    Формат: products/product_{id}/images/{uuid}.{ext}
+    """
+    ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else 'jpg'
+    unique_name = f'{uuid.uuid4().hex}.{ext}'
+    return f'products/product_{instance.product_info_id}/images/{unique_name}'
+
+def validate_image_size(file):
+    """Валидатор: максимальный размер файла 10 МБ"""
+    max_size = 10 * 1024 * 1024  # 10 MB
+    if file.size > max_size:
+        raise ValidationError(
+            f'Размер файла не должен превышать 10 МБ. '
+            f'Текущий размер: {file.size / 1024 / 1024:.1f} МБ'
+        )
+
+
+class ProductImage(models.Model):
+    """
+    Модель для дополнительных изображений товара.
+    Один товар → много фото.
+    """
+    product_info = models.ForeignKey(
+        ProductInfo,
+        verbose_name='Товар',
+        on_delete=models.CASCADE,
+        related_name='images'
+    )
+
+    # Оригинал изображения (загруженный файл)
+    original = ProcessedImageField(
+        verbose_name='Оригинал',
+        upload_to=product_image_path,
+        processors=[ResizeToFit(1920, 1920)],
+        format='WEBP',
+        options={'quality': 90},
+        validators=[
+            FileExtensionValidator(['jpg', 'jpeg', 'png', 'webp']),
+            validate_image_size
+        ],
+        help_text='Оригинальное изображение (макс. 1920x1920px)'
+    )
+
+    # Миниатюры (ImageSpecField — ленивая генерация)
+    thumbnail_small = ImageSpecField(
+        source='original',
+        processors=[ResizeToFill(100, 100)],
+        format='WEBP',
+        options={'quality': 70}
+    )
+    thumbnail_medium = ImageSpecField(
+        source='original',
+        processors=[SmartResize(300, 300)],
+        format='WEBP',
+        options={'quality': 80}
+    )
+    thumbnail_large = ImageSpecField(
+        source='original',
+        processors=[ResizeToFit(800, 800)],
+        format='WEBP',
+        options={'quality': 85}
+    )
+
+    # preview, full_view — ProcessedImageField без source
+    # Заполняются через Celery-задачу
+    preview = ProcessedImageField(
+        verbose_name='Превью',
+        upload_to=product_image_path,
+        processors=[ResizeToFit(400, 400)],
+        format='WEBP',
+        options={'quality': 80},
+        null=True,
+        blank=True,
+        help_text='Предварительный просмотр 400x400'
+    )
+    full_view = ProcessedImageField(
+        verbose_name='Полный просмотр',
+        upload_to=product_image_path,
+        processors=[ResizeToFit(1200, 1200)],
+        format='WEBP',
+        options={'quality': 85},
+        null=True,
+        blank=True,
+        help_text='Фото товара 1200x1200px'
+    )
+
+    is_main = models.BooleanField(
+        verbose_name='Основное фото',
+        default=False,
+        help_text='Отметьте, если это главное фото товара'
+    )
+    alt_text = models.CharField(
+        verbose_name='Alt-текст',
+        max_length=255,
+        blank=True,
+        help_text='Текст для SEO и accessibility'
+    )
+    sort_order = models.PositiveIntegerField(
+        verbose_name='Порядок сортировки',
+        default=0,
+        help_text='Чем меньше число, тем выше позиция'
+    )
+    uploaded_at = models.DateTimeField(
+        verbose_name='Дата загрузки',
+        auto_now_add=True
+    )
+
+    class Meta:
+        verbose_name = 'Изображение товара'
+        verbose_name_plural = 'Изображения товаров'
+        ordering = ('sort_order', 'uploaded_at')
+
+    def __str__(self):
+        return f'Фото {self.id} для "{self.product_info.full_name}"'
+
+    def save(self, *args, **kwargs):
+        """
+        Переопределяем save:
+        1. Автоматически устанавливаем is_main для первого изображения
+        2. НЕ запускаем Celery здесь — это делает ViewSet!
+        """
+        is_new = self.pk is None
+
+        # Первое изображение → основное
+        if is_new and not self.product_info.images.exists():
+            self.is_main = True
+
+        super().save(*args, **kwargs)
+
+    @property
+    def all_thumbnails(self):
+        """Возвращает словарь со всеми размерами миниатюр"""
+        return {
+            'small': self.thumbnail_small.url if self.thumbnail_small else None,
+            'medium': self.thumbnail_medium.url if self.thumbnail_medium else None,
+            'large': self.thumbnail_large.url if self.thumbnail_large else None,
+            'preview': self.preview.url if self.preview else None,
+            'full': self.full_view.url if self.full_view else None,
+            'original': self.original.url if self.original else None,
+        }
+
+    def delete(self, *args, **kwargs):
+        """При удалении записи удаляем и файлы с диска"""
+        storage = self.original.storage
+
+        # Удаляем все файлы
+        for field_name in ['original', 'preview', 'full_view']:
+            field = getattr(self, field_name, None)
+            if field and field.name:
+                try:
+                    storage.delete(field.name)
+                except Exception:
+                    pass
+
+        # Удаляем кеш imagekit
+        for spec_name in ['thumbnail_small', 'thumbnail_medium',
+                          'thumbnail_large']:
+            try:
+                spec = getattr(self.__class__, spec_name, None)
+                if spec:
+                    cache_file = ImageCacheFile(spec, self)
+                    if cache_file and cache_file.name:
+                        storage.delete(cache_file.name)
+            except Exception:
+                pass
+
+        super().delete(*args, **kwargs)
 
 
 class Contact(models.Model):

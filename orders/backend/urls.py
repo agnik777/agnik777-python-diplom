@@ -1,5 +1,6 @@
 # backend/urls.py
 from django.urls import path, include
+from rest_framework.routers import DefaultRouter
 from .views import (UserRegistrationView, ConfirmEmailView,
                     UserLoginView, PartnerUpdate, ShopListView,
                     ShopCategoriesView, ProductSearchView, CartView,
@@ -7,9 +8,14 @@ from .views import (UserRegistrationView, ConfirmEmailView,
                     ContactDetailView, OrderCreateView, OrderConfirmView,
                     OrderListView, OrderDetailView, ContactViewSet,
                     ShopPermissionUpdateView, ShopOrderListView,
-                    LogoutView,)
+                    LogoutView, AvatarViewSet, ProductImageViewSet,
+                    SocialAuthCompleteView, SocialAuthErrorView,)
 from .views_debug import SentryDebugView
 
+
+router = DefaultRouter()
+router.register(r'product-images', ProductImageViewSet,
+                basename='product-image')
 
 urlpatterns = [
     path('register/', UserRegistrationView.as_view(), name='register'),
@@ -47,13 +53,22 @@ urlpatterns = [
          name='shop-order-list'),
     path('debug/sentry/', SentryDebugView.as_view(),
          name='debug-sentry'),
-]
 
-from .views import SocialAuthCompleteView, SocialAuthErrorView
+    path('avatar/', AvatarViewSet.as_view({'get': 'retrieve'}),
+      name='avatar-detail'),
+    path('avatar/upload/', AvatarViewSet.as_view({'post': 'upload'}),
+         name='avatar-upload'),
+    path('avatar/delete/',
+         AvatarViewSet.as_view({'delete': 'delete_avatar'}),
+         name='avatar-delete'),
+    path('', include(router.urls)),
+]
 
 urlpatterns += [
     path('social-auth/', include('social_django.urls',
                                      namespace='social')),
-    path('social-auth/complete/', SocialAuthCompleteView.as_view(), name='social-complete'),
-    path('social-auth/error/', SocialAuthErrorView.as_view(), name='social-error'),
+    path('social-auth/complete/', SocialAuthCompleteView.as_view(),
+         name='social-complete'),
+    path('social-auth/error/', SocialAuthErrorView.as_view(),
+         name='social-error'),
 ]

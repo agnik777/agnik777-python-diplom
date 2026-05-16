@@ -18,7 +18,6 @@ import dj_database_url
 
 import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
-# from sentry_sdk.integrations.redis import RedisIntegration
 from sentry_sdk.integrations.logging import LoggingIntegration
 from django.http import Http404
 from django.core.exceptions import PermissionDenied
@@ -45,8 +44,8 @@ ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '*').split(',')
 # Application definition
 
 INSTALLED_APPS = [
-    'jet.dashboard',
-    'jet',
+    # 'jet',
+    # 'jet.dashboard',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -57,6 +56,7 @@ INSTALLED_APPS = [
     'rest_framework.authtoken',
     'django_rest_passwordreset',
     'backend',
+    'imagekit',
     'drf_spectacular',
     'drf_spectacular_sidecar',
     'social_django',
@@ -133,7 +133,7 @@ STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 AUTH_USER_MODEL = 'backend.User'
 
@@ -191,8 +191,13 @@ SPECTACULAR_SETTINGS = {
     'DESCRIPTION': 'API для управления заказами',
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
+    'COMPONENT_SPLIT_REQUEST': True,
+    'ENUM_NAME_OVERRIDES': {
+        'FileType': 'image/jpeg image/png image/webp',
+    },
 }
 
+COMPONENT_SPLIT_REQUEST = True
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
@@ -231,6 +236,13 @@ AUTHENTICATION_BACKENDS = (
     'social_core.backends.yandex.YandexOAuth2',
     'django.contrib.auth.backends.ModelBackend',
 )
+
+# django-imagekit — асинхронная генерация миниатюр
+IMAGEKIT_DEFAULT_CACHEFILE_BACKEND = 'imagekit.cachefiles.backends.Async'
+IMAGEKIT_DEFAULT_CACHEFILE_STRATEGY = 'imagekit.cachefiles.strategies.Optimistic'
+
+# Настройки кеша (опционально, для хранения сгенерированных миниатюр)
+IMAGEKIT_CACHEFILE_DIR = 'cache/images'
 
 # Яндекс OAuth
 SOCIAL_AUTH_YANDEX_OAUTH2_KEY = os.getenv('YANDEX_APP_ID', '')

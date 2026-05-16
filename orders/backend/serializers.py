@@ -3,7 +3,8 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model, authenticate
 from django.utils.translation import gettext_lazy as _
 from .models import (Shop, Category, Product, ProductInfo, Parameter,
-                     ProductParameter, OrderItem, Order, Phone, Contact)
+                     ProductParameter, OrderItem, Order, Phone, Contact,
+                     ProductImage)
 
 
 User = get_user_model()
@@ -650,3 +651,182 @@ class YAMLImportSerializer(serializers.Serializer):
                 )
 
         return data
+
+
+class AvatarSerializer(serializers.ModelSerializer):
+    """
+    Сериализатор для загрузки/обновления аватара пользователя.
+    """
+    avatar_url = serializers.URLField(read_only=True)
+    avatar_display_url = serializers.URLField(read_only=True)
+
+    class Meta:
+        model = User
+        fields = ('id', 'avatar', 'avatar_url', 'avatar_display_url', 'email', 'first_name', 'last_name')
+        read_only_fields = ('id', 'email', 'first_name', 'last_name', 'avatar_url', 'avatar_display_url')
+
+    def validate_avatar(self, value):
+        """Валидация загружаемого аватара."""
+        # Проверка размера (макс. 5 МБ)
+        max_size = 5 * 1024 * 1024  # 5 MB
+        if value.size > max_size:
+            raise serializers.ValidationError(
+                f'Размер файла не должен превышать 5 МБ. '
+                f'Текущий размер: {value.size / 1024 / 1024:.1f} МБ'
+            )
+
+        # Проверка формата
+        allowed_formats = ['image/jpeg', 'image/png', 'image/webp']
+        if value.content_type not in allowed_formats:
+            raise serializers.ValidationError(
+                f'Допустимые форматы: JPEG, PNG, WebP. '
+                f'Получен: {value.content_type}'
+            )
+
+        return value
+
+
+class ProductImageListSerializer(serializers.ModelSerializer):
+    """
+    Сериализатор для списка изображений товара.
+    Возвращает URL'ы миниатюр (уже сгенерированных Celery).
+    """
+    thumbnails = serializers.SerializerMethodField()
+    product_name = serializers.CharField(source='product_info.full_name', read_only=True)
+
+    class Meta:
+        model = ProductImage
+        fields = (
+            'id',
+            'product_info',
+            'product_name',
+            'original',
+            'preview',
+            'full_view',
+            'is_main',
+            'alt_text',
+            'sort_order',
+            'uploaded_at',
+            'thumbnails',
+        )
+        read_only_fields = (
+            'id', 'uploaded_at', 'product_name',
+            'thumbnails', 'preview', 'full_view',
+        )
+
+    def get_thumbnails(self, obj):
+        """
+        Возвращает словарь со всеми размерами миниатюр.
+        Все поля (preview, full_view) генерируются АСИНХРОННО через Celery.
+        """
+        return {
+            'small': obj.thumbnail_small.url if obj.thumbnail_small else None,
+            'medium': obj.thumbnail_medium.url if obj.thumbnail_medium else None,
+            'large': obj.thumbnail_large.url if obj.thumbnail_large else None,
+            'preview': obj.preview.url if obj.preview else None,
+            'full': obj.full_view.url if obj.full_view else None,
+            'original': obj.original.url if obj.original else None,
+        }
+
+
+class ProductImageUploadSerializer(serializers.ModelSerializer):
+    """
+    Сериализатор для ЗАГРУЗКИ нового изображения товара.
+    Принимает файл + опциональные поля.
+    """
+
+    class Meta:
+        model = ProductImage
+        fields = (
+            'product_info',
+            'original',
+            'is_main',
+            'alt_text',
+            'sort_order',
+        )
+
+    def validate_product_info(self, value):
+        """Проверяем, что товар существует."""
+        if not ProductInfo.objects.filter(id=value.id).exists():
+            raise serializers.ValidationError('Товар с таким ID не найден.')
+        return value
+
+    def validate_original(self, value):
+        """Валидация изображения."""
+        # Размер
+        max_size = 10 * 1024 * 1024  # 10 MB
+        if value.size > max_size:
+            raise serializers.ValidationError(
+                f'Размер файла не должен превышать 10 МБ. '
+                f'Текущий размер: {value.size / 1024 / 1024:.1f} МБ'
+            )
+        # Формат
+        allowed = ['image/jpeg', 'image/png', 'image/webp']
+        if value.content_type not in allowed:
+            raise serializers.ValidationError(
+                f'Допустимые форматы: JPEG, PNG, WebP. Получен: {value.content_type}'
+            )
+        return value
+
+
+class ProductImageBulkUploadSerializer(serializers.Serializer):
+    """
+    Сериализатор для МНОЖЕСТВЕННОЙ загрузки изображений.
+    Принимает: product_info + список файлов.
+    """
+    product_info = serializers.PrimaryKeyRelatedField(
+        queryset=ProductInfo.objects.all(),
+        help_text='ID товара, к которому привязываются изображения'
+    )
+    images = serializers.ListField(
+        child=serializers.ImageField(),
+        min_length=1,
+        max_length=20,
+        help_text='Список файлов изображений (до 20 шт., макс. 10 МБ каждый)'
+    )
+    alt_text = serializers.CharField(
+        required=False,
+        default='',
+        max_length=255,
+        help_text='Alt-текст для всех загружаемых изображений'
+    )
+
+    def validate_images(self, value):
+        """Валидация каждого файла в списке."""
+        allowed_formats = ['image/jpeg', 'image/png', 'image/webp']
+        max_size = 10 * 1024 * 1024  # 10 MB
+        for img in value:
+            if img.content_type not in allowed_formats:
+                raise serializers.ValidationError(
+                    f'Файл "{img.name}" имеет недопустимый формат {img.content_type}. '
+                    f'Разрешены: JPEG, PNG, WebP.'
+                )
+            if img.size > max_size:
+                raise serializers.ValidationError(
+                    f'Файл "{img.name}" превышает 10 МБ ({img.size / 1024 / 1024:.1f} МБ).'
+                )
+        return value
+
+
+class ProductImageUpdateSerializer(serializers.ModelSerializer):
+    """
+    Сериализатор для ОБНОВЛЕНИЯ метаданных изображения.
+    Не позволяет менять сам файл (original) — только метаданные.
+    """
+
+    class Meta:
+        model = ProductImage
+        fields = (
+            'is_main',
+            'alt_text',
+            'sort_order',
+        )
+
+    def update(self, instance, validated_data):
+        # Если устанавливаем is_main=True — сбрасываем у остальных
+        if validated_data.get('is_main'):
+            ProductImage.objects.filter(
+                product_info=instance.product_info,
+                is_main=True
+            ).exclude(id=instance.id).update(is_main=False)
+        return super().update(instance, validated_data)

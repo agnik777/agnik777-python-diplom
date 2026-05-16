@@ -8,18 +8,24 @@ from django.db.models import Q
 from django.core.mail import send_mail
 from django.core.exceptions import ValidationError
 from django.conf import settings
+from django.shortcuts import get_object_or_404
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema_view, extend_schema, \
+    OpenApiParameter, OpenApiExample, inline_serializer
 
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.views import APIView
-from rest_framework import generics, status, permissions
+from rest_framework import generics, status, permissions, viewsets, parsers
+from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.permissions import IsAuthenticated, AllowAny, \
+    IsAuthenticatedOrReadOnly
 from rest_framework.authtoken.models import Token
 from requests.exceptions import RequestException
 
 from .models import (
     Shop, ConfirmEmailToken, ProductInfo, Order, Contact, OrderItem,
-    Phone
+    Phone, ProductImage
 )
 from .serializers import (
     YAMLImportSerializer, UserRegistrationSerializer, UserLoginSerializer,
@@ -28,7 +34,9 @@ from .serializers import (
     OrderItemSerializer, UpdateCartItemSerializer, ContactSerializer,
     PhoneSerializer, OrderCreateSerializer, OrderDetailSerializer,
     OrderConfirmSerializer, OrderListSerializer, ShopPermissionSerializer,
-    ShopOrderListSerializer
+    ShopOrderListSerializer, AvatarSerializer, ProductImageUploadSerializer,
+    ProductImageUpdateSerializer, ProductImageBulkUploadSerializer,
+    ProductImageListSerializer
 )
 from .utils import ProductUtils, OrderUtils
 from .yaml_processor import YAMLProcessor
@@ -43,6 +51,7 @@ from .tasks import (
     send_all_shop_owner_emails_task, send_order_confirmed_email_task,
     send_order_status_changed_email_task
 )
+from .image_tasks import generate_product_thumbnails, bulk_generate_thumbnails
 
 
 class SocialAuthCompleteView(APIView):
@@ -870,3 +879,229 @@ class ShopOrderListView(APIView):
         serializer = ShopOrderListSerializer(
             orders, many=True, context={'user_shop_ids': user_shop_ids})
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class AvatarViewSet(viewsets.ViewSet):
+    """
+    API для управления аватаром пользователя.
+
+    * Требуется аутентификация.
+    * Пользователь может управлять только СВОИМ аватаром.
+    """
+    permission_classes = [IsAuthenticated]
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser]
+
+    def get_serializer_class(self):
+        return AvatarSerializer
+
+    def retrieve(self, request):
+        """
+        GET /api/avatar/ — просмотр текущего аватара.
+        """
+        serializer = AvatarSerializer(request.user)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['post'], url_path='upload')
+    def upload(self, request):
+        """
+        POST /api/avatar/upload/ — загрузить/обновить аватар.
+
+        Тело запроса (multipart/form-data):
+        - avatar: файл изображения (JPEG, PNG, WebP, макс. 5 МБ)
+        """
+        serializer = AvatarSerializer(
+            request.user,
+            data=request.data,
+            partial=True
+        )
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                {
+                    'status': 'success',
+                    'message': 'Аватар успешно обновлён',
+                    'data': serializer.data
+                },
+                status=status.HTTP_200_OK
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['delete'], url_path='delete')
+    def delete_avatar(self, request):
+        """
+        DELETE /api/v1/avatar/delete/ — удалить аватар.
+        """
+        user = request.user
+        if user.avatar:
+            # Удаляем файл
+            storage = user.avatar.storage
+            if user.avatar:
+                storage.delete(user.avatar.name)
+            # Очищаем поле
+            user.avatar = None
+            user.save(update_fields=['avatar'])
+            return Response(
+                {'status': 'success', 'message': 'Аватар удалён'},
+                status=status.HTTP_200_OK
+            )
+        return Response(
+            {'status': 'error', 'message': 'Аватар не установлен'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+
+class ProductImageViewSet(viewsets.ModelViewSet):
+    """
+    API для управления изображениями товаров.
+
+    list        → GET    /api/v1/product-images/
+    retrieve    → GET    /api/v1/product-images/{id}/
+    create      → POST   /api/v1/product-images/          (загрузить одно)
+    update      → PUT    /api/v1/product-images/{id}/
+    partial_update → PATCH /api/v1/product-images/{id}/
+    destroy     → DELETE /api/v1/product-images/{id}/
+
+    Дополнительные endpoints:
+    - GET  /api/v1/product-images/by-product/{product_info_id}/
+    - POST /api/v1/product-images/bulk-upload/
+    - POST /api/v1/product-images/{id}/set-main/
+    - POST /api/v1/product-images/{id}/regenerate/
+    """
+    queryset = ProductImage.objects.all()
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser,
+                      parsers.JSONParser]
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return ProductImageUploadSerializer
+        elif self.action in ('update', 'partial_update'):
+            return ProductImageUpdateSerializer
+        elif self.action == 'bulk_upload':
+            return ProductImageBulkUploadSerializer
+        return ProductImageListSerializer
+
+    def perform_create(self, serializer):
+        """
+        После создания ЗАПУСКАЕМ Celery-задачу.
+        Модель не запускает задачу сама — это ответственность ViewSet.
+        """
+        instance = serializer.save()
+        # Асинхронно генерируем миниатюры — НЕ блокируем ответ
+        generate_product_thumbnails.delay(instance.id)
+
+    def perform_destroy(self, instance):
+        """При удалении вызываем штатный delete модели (удаляет и файлы)."""
+        instance.delete()
+
+    # ──── Дополнительные endpoints ────
+
+    @action(detail=False, methods=['get'],
+            url_path='by-product/(?P<product_info_id>[^/.]+)')
+    def by_product(self, request, product_info_id=None):
+        """
+        GET /api/v1/product-images/by-product/{product_info_id}/
+        Возвращает ВСЕ изображения указанного товара.
+        """
+        product_info = get_object_or_404(ProductInfo, id=product_info_id)
+        images = ProductImage.objects.filter(product_info=product_info)
+        serializer = ProductImageListSerializer(images, many=True,
+                                                context={'request': request})
+        return Response({
+            'product_info_id': product_info.id,
+            'product_name': product_info.full_name,
+            'count': images.count(),
+            'results': serializer.data
+        })
+
+    @action(detail=False, methods=['post'], url_path='bulk-upload',
+            parser_classes=[parsers.MultiPartParser, parsers.FormParser])
+    def bulk_upload(self, request):
+        """
+        POST /api/v1/product-images/bulk-upload/
+        Множественная загрузка изображений для одного товара.
+
+        Загружает все файлы, затем запускает ОДНУ Celery-задачу на всю пачку.
+        """
+        serializer = ProductImageBulkUploadSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        product_info = serializer.validated_data['product_info']
+        images = serializer.validated_data['images']
+        alt_text = serializer.validated_data.get('alt_text', '')
+
+        created_ids = []
+        errors = []
+
+        for idx, image_file in enumerate(images):
+            try:
+                img_instance = ProductImage.objects.create(
+                    product_info=product_info,
+                    original=image_file,
+                    alt_text=alt_text or f'Изображение {idx + 1} товара {product_info.full_name}',
+                    sort_order=idx,
+                    is_main=(idx == 0 and not ProductImage.objects.filter(
+                        product_info=product_info, is_main=True
+                    ).exists())
+                )
+                created_ids.append(img_instance.id)
+
+            except Exception as exc:
+                errors.append({
+                    'file': getattr(image_file, 'name', f'image_{idx}'),
+                    'error': str(exc)
+                })
+
+        # Запускаем ОДНУ задачу на все изображения (а не N отдельных)
+        if created_ids:
+            bulk_generate_thumbnails.delay(created_ids)
+
+        return Response({
+            'status': 'success' if not errors else 'partial',
+            'product_info_id': product_info.id,
+            'total_uploaded': len(images),
+            'created': len(created_ids),
+            'errors': len(errors),
+            'image_ids': created_ids,
+            'error_details': errors if errors else None,
+        },
+            status=status.HTTP_201_CREATED if not errors else status.HTTP_207_MULTI_STATUS)
+
+    @action(detail=True, methods=['post'], url_path='set-main')
+    def set_main(self, request, pk=None):
+        """
+        POST /api/v1/product-images/{id}/set-main/
+        Устанавливает данное изображение как главное для товара.
+        """
+        image = self.get_object()
+        ProductImage.objects.filter(
+            product_info=image.product_info,
+            is_main=True
+        ).exclude(id=image.id).update(is_main=False)
+
+        image.is_main = True
+        image.save(update_fields=['is_main'])
+
+        return Response({
+            'status': 'success',
+            'message': f'Изображение {image.id} теперь главное для товара "{image.product_info.full_name}"'
+        })
+
+    @action(detail=True, methods=['post'], url_path='regenerate')
+    def regenerate(self, request, pk=None):
+        """
+        POST /api/v1/product-images/{id}/regenerate/
+        Принудительно перегенерировать миниатюры для изображения.
+        """
+        image = self.get_object()
+        # Сбрасываем старые миниатюры, чтобы задача заново их создала
+        image.preview = None
+        image.full_view = None
+        image.save(update_fields=['preview', 'full_view'])
+
+        generate_product_thumbnails.delay(image.id)
+
+        return Response({
+            'status': 'success',
+            'message': f'Запущена регенерация миниатюр для изображения {image.id}'
+        })
