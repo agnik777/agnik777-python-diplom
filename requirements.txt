@@ -17,3 +17,4 @@ redis==7.4.0
 django-celery-beat==2.9.0
 django-imagekit==6.1.0
 django-cacheops==7.2
+django-redis==6.0.0

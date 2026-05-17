@@ -1,12 +1,9 @@
 # orders/dashboard.py
 from jet.dashboard.dashboard import Dashboard
 from jet.dashboard.modules import (
-    AppList,
-    RecentActions,
-    Feed,
-    LinkList,
-    ModelList,
+    AppList, RecentActions, Feed, LinkList, ModelList,
 )
+from django.db import connection
 
 
 class CustomIndexDashboard(Dashboard):
@@ -15,6 +12,27 @@ class CustomIndexDashboard(Dashboard):
     columns = 3  # Количество колонок (по умолчанию 2)
 
     def init_with_context(self, context):
+        # Проверяем, есть ли таблицы Jet Dashboard в БД
+        jet_tables_exist = ('jet_dashboard_dashboardmodule' in
+                            connection.introspection.table_names())
+
+        if not jet_tables_exist:
+            # Если таблиц нет — используем минимальную панель
+            self.children.append(
+                ModelList(
+                    title='Модели',
+                    models=[
+                        'backend.User',
+                        'backend.Shop',
+                        'backend.Product',
+                        'backend.Order',
+                    ],
+                    column=0,
+                    order=0,
+                )
+            )
+            return
+
         # Колонка 1 — основные модели
         self.children.append(
             ModelList(

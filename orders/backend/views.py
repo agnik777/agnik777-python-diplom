@@ -1,5 +1,6 @@
 # backend/views.py
 import yaml
+import logging
 from datetime import timedelta
 
 from django.http import JsonResponse, Http404
@@ -11,7 +12,7 @@ from django.conf import settings
 from django.shortcuts import get_object_or_404
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema_view, extend_schema, \
-    OpenApiParameter, OpenApiExample, inline_serializer
+    OpenApiParameter, OpenApiExample, inline_serializer, OpenApiResponse
 
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.views import APIView
@@ -54,6 +55,31 @@ from .tasks import (
 from .image_tasks import generate_product_thumbnails, bulk_generate_thumbnails
 
 
+logger = logging.getLogger(__name__)
+
+
+@extend_schema(
+    summary="Завершение авторизации через соцсеть (Яндекс)",
+    description="После успешной авторизации через Яндекс, "
+                "возвращает JWT-токен и данные пользователя.",
+    responses={
+        200: OpenApiResponse(
+            response=inline_serializer(
+                name="SocialAuthSuccess",
+                fields={
+                    "token": OpenApiTypes.STR,
+                    "user_id": OpenApiTypes.INT,
+                    "email": OpenApiTypes.STR,
+                    "detail": OpenApiTypes.STR,
+                },
+            ),
+            description="Успешная авторизация",
+        ),
+        400: OpenApiResponse(description="Токен не найден или пользователь "
+                                         "не авторизован"),
+    },
+    tags=["Auth"],
+)
 class SocialAuthCompleteView(APIView):
     """
     View, которая возвращает токен после успешной авторизации через соцсеть.
@@ -88,6 +114,31 @@ class SocialAuthCompleteView(APIView):
         }, status=status.HTTP_200_OK)
 
 
+@extend_schema(
+    summary="Ошибка авторизации через соцсеть",
+    description="Возвращает описание ошибки, произошедшей при авторизации "
+                "через соцсеть.",
+    parameters=[
+        OpenApiParameter(
+            name='error',
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.QUERY,
+            description='Описание ошибки, возвращаемое провайдером',
+        ),
+    ],
+    responses={
+        400: OpenApiResponse(
+            response=inline_serializer(
+                name="SocialAuthError",
+                fields={
+                    "error": OpenApiTypes.STR,
+                },
+            ),
+            description="Ошибка авторизации"
+        ),
+    },
+    tags=["Auth"],
+)
 class SocialAuthErrorView(APIView):
     """
     View для отображения ошибки авторизации.
@@ -122,6 +173,18 @@ class BaseUserDataView(generics.GenericAPIView):
         return super().get_permissions()
 
 
+@extend_schema(
+    summary="Регистрация нового пользователя",
+    description="Создаёт нового пользователя и отправляет токен подтверждения "
+                "на email.",
+    request=UserRegistrationSerializer,
+    responses={
+        201: OpenApiResponse(description="Пользователь создан, "
+                                         "письмо отправлено"),
+        400: OpenApiResponse(description="Невалидные данные"),
+    },
+    tags=["Auth"],
+)
 class UserRegistrationView(generics.CreateAPIView):
     """Регистрация нового пользователя"""
     serializer_class = UserRegistrationSerializer
@@ -135,6 +198,25 @@ class UserRegistrationView(generics.CreateAPIView):
         send_confirmation_email_task.delay(user.id, token.key)
 
 
+@extend_schema(
+    summary="Подтверждение email по токену",
+    description="Активирует аккаунт пользователя по одноразовому токену "
+                "(24 часа действителен).",
+    parameters=[
+        OpenApiParameter(
+            name='token_key',
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.PATH,
+            description='Токен подтверждения, отправленный на email',
+            required=True,
+        ),
+    ],
+    responses={
+        200: OpenApiResponse(description="Email подтверждён"),
+        400: OpenApiResponse(description="Токен устарел или неверен"),
+    },
+    tags=["Auth"],
+)
 class ConfirmEmailView(APIView):
     """Подтверждение email по токену"""
     throttle_classes = [ConfirmEmailThrottle]
@@ -163,6 +245,28 @@ class ConfirmEmailView(APIView):
             )
 
 
+@extend_schema(
+    summary="Вход в систему",
+    description="Аутентификация пользователя по email и паролю. "
+                "Возвращает токен.",
+    request=UserLoginSerializer,
+    responses={
+        200: OpenApiResponse(
+            response=inline_serializer(
+                name="LoginSuccess",
+                fields={
+                    "token": OpenApiTypes.STR,
+                    "user_id": OpenApiTypes.INT,
+                    "email": OpenApiTypes.STR,
+                },
+            ),
+            description="Успешный вход",
+        ),
+        403: OpenApiResponse(description="Аккаунт не активирован"),
+        400: OpenApiResponse(description="Неверные учётные данные"),
+    },
+    tags=["Auth"],
+)
 class UserLoginView(generics.GenericAPIView):
     """Вход пользователя в систему"""
     serializer_class = UserLoginSerializer
@@ -195,6 +299,16 @@ class UserLoginView(generics.GenericAPIView):
         }, status=status.HTTP_200_OK)
 
 
+@extend_schema(
+    summary="Выход из системы",
+    description="Удаляет токен аутентификации пользователя, "
+                "делая его недействительным.",
+    responses={
+        200: OpenApiResponse(description="Успешный выход"),
+        500: OpenApiResponse(description="Ошибка при выходе"),
+    },
+    tags=["Auth"],
+)
 class LogoutView(APIView):
     """
     API для выхода пользователя из системы (удаление токена).
@@ -224,6 +338,78 @@ class LogoutView(APIView):
             )
 
 
+@extend_schema_view(
+    post=extend_schema(
+        summary="Обновление прайса магазина через YAML",
+        description="""
+        Загружает прайс-лист в формате YAML от поставщика. Поддерживает:
+        - Загрузку по URL (http/https)
+        - Загрузку локального файла (file:// или абсолютный путь)
+        - Загрузку через multipart/form-data (файл)
+        """,
+        request={
+            'multipart/form-data': {
+                'type': 'object',
+                'properties': {
+                    'url': {'type': 'string',
+                            'description': 'URL YAML-файла'},
+                    'file_path': {'type': 'string',
+                                  'description': 'Путь к локальному файлу'},
+                    'file': {'type': 'string', 'format': 'binary',
+                             'description': 'Загружаемый YAML-файл'},
+                },
+                'required': ['url', 'file_path', 'file'],
+                'example': {
+                    'url': 'https://example.com/prices.yaml',
+                    'file_path': '/data/prices.yaml',
+                    'file': 'file: prices.yaml'
+                }
+            }
+        },
+        responses={
+            200: OpenApiResponse(
+                response=inline_serializer(
+                    name="PartnerUpdateSuccess",
+                    fields={
+                        'Status': OpenApiTypes.BOOL,
+                        'Message': OpenApiTypes.STR,
+                        'Details': OpenApiTypes.OBJECT,
+                    },
+                ),
+                description="Успешное обновление",
+            ),
+            400: OpenApiResponse(description="Ошибка валидации или формата"),
+            403: OpenApiResponse(description="Нет прав доступа"),
+            404: OpenApiResponse(description="Файл не найден"),
+            500: OpenApiResponse(description="Внутренняя ошибка сервера"),
+        },
+        tags=["Partner"],
+        examples=[
+            OpenApiExample(
+                "Пример запроса с файлом",
+                summary="Загрузка через файл",
+                value={
+                    "file": "file: prices.yaml"
+                },
+                request_only=True,
+            ),
+            OpenApiExample(
+                "Пример ответа успеха",
+                summary="Успешный ответ",
+                value={
+                    "Status": True,
+                    "Message": "Данные успешно обновлены",
+                    "Details": {
+                        "categories_created": 2,
+                        "products_created": 15,
+                        "products_updated": 3
+                    }
+                },
+                response_only=True,
+            ),
+        ],
+    )
+)
 class PartnerUpdate(APIView):
     """Класс для обновления прайса от поставщика"""
     permission_classes = [IsAuthenticated, IsShopOwner]
@@ -331,6 +517,14 @@ class PartnerUpdate(APIView):
         )
 
 
+@extend_schema_view(
+    get=extend_schema(
+        summary="Список магазинов",
+        description="Возвращает список активных магазинов.",
+        responses={200: ShopSerializer(many=True)},
+        tags=['Магазины'],
+    )
+)
 class ShopListView(generics.ListAPIView):
     """
     API для получения списка активных магазинов
@@ -341,6 +535,30 @@ class ShopListView(generics.ListAPIView):
     permission_classes = [permissions.AllowAny]
 
 
+@extend_schema_view(
+    get=extend_schema(
+        summary="Магазины с категориями",
+        description="Возвращает магазины со списком их категорий.",
+        parameters=[
+            OpenApiParameter(
+                name='category_id',
+                type=int,
+                location=OpenApiParameter.QUERY,
+                description='Фильтр по ID категории',
+                required=False,
+            ),
+            OpenApiParameter(
+                name='shop_name',
+                type=str,
+                location=OpenApiParameter.QUERY,
+                description='Фильтр по названию магазина (частичное совпадение)',
+                required=False,
+            ),
+        ],
+        responses={200: ShopCategorySerializer(many=True)},
+        tags=['Магазины'],
+    )
+)
 class ShopCategoriesView(generics.ListAPIView):
     """
     API для получения магазинов с их категориями
@@ -366,9 +584,60 @@ class ShopCategoriesView(generics.ListAPIView):
         if shop_name:
             queryset = queryset.filter(name__icontains=shop_name)
 
-        return queryset.distinct()
+        # Явное кэширование для параметризованных запросов
+        # cacheops автоматически инвалидирует кэш при изменении данных
+        return queryset.distinct().cache()
+
+    def list(self, request, *args, **kwargs):
+        """Добавляем заголовки кэширования в ответ"""
+        response = super().list(request, *args, **kwargs)
+        response['X-Cache-Enabled'] = 'true'
+        response['X-Cache-TTL'] = '1800'  # 30 минут
+        return response
 
 
+@extend_schema_view(
+    get=extend_schema(
+        summary="Поиск товаров",
+        description="Поиск товаров с фильтрацией по магазину, категории, "
+                    "названию, цене и наличию.",
+        parameters=[
+            OpenApiParameter(name='shop_name', type=str,
+                             location=OpenApiParameter.QUERY,
+                             description='Название магазина '
+                                         '(частичное совпадение)',
+                             required=False),
+            OpenApiParameter(name='category_name', type=str,
+                             location=OpenApiParameter.QUERY,
+                             description='Название категории '
+                                         '(частичное совпадение)',
+                             required=False),
+            OpenApiParameter(name='product_name', type=str,
+                             location=OpenApiParameter.QUERY,
+                             description='Название товара '
+                                         '(частичное совпадение)',
+                             required=False),
+            OpenApiParameter(name='min_price', type=float,
+                             location=OpenApiParameter.QUERY,
+                             description='Минимальная розничная цена',
+                             required=False),
+            OpenApiParameter(name='max_price', type=float,
+                             location=OpenApiParameter.QUERY,
+                             description='Максимальная розничная цена',
+                             required=False),
+            OpenApiParameter(name='in_stock_only', type=bool,
+                             location=OpenApiParameter.QUERY,
+                             description='Только товары в наличии',
+                             required=False),
+            OpenApiParameter(name='page', type=int,
+                             location=OpenApiParameter.QUERY,
+                             description='Номер страницы (пагинация)',
+                             required=False),
+        ],
+        responses={200: ProductInfoSerializer(many=True)},
+        tags=['products'],
+    )
+)
 class ProductSearchView(generics.ListAPIView):
     """
     API для поиска товаров по параметрам
@@ -413,6 +682,18 @@ class ProductSearchView(generics.ListAPIView):
         if data.get('in_stock_only'):
             queryset = queryset.filter(quantity__gt=0)
 
+        # Если есть параметры фильтрации — кэшируем с ключом по параметрам
+        # cacheops сам сгенерирует ключ на основе SQL и параметров
+        if any([
+            data.get('shop_name'),
+            data.get('category_name'),
+            data.get('product_name'),
+            data.get('min_price') is not None,
+            data.get('max_price') is not None,
+            data.get('in_stock_only'),
+        ]):
+            queryset = queryset.cache()
+
         return queryset.order_by('-id')
 
     def apply_filters(self, queryset, filters_data):
@@ -443,18 +724,32 @@ class ProductSearchView(generics.ListAPIView):
         return queryset
 
     def list(self, request, *args, **kwargs):
-        """Переопределяем для добавления метаданных"""
+        """Переопределяем для добавления метаданных и заголовков кэширования"""
         queryset = self.filter_queryset(self.get_queryset())
 
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
+            response = self.get_paginated_response(serializer.data)
+        else:
+            serializer = self.get_serializer(queryset, many=True)
+            response = Response(serializer.data)
 
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
+        # Добавляем заголовки кэширования
+        response['X-Cache-Enabled'] = 'true'
+        response['X-Cache-TTL'] = '600'  # 10 минут
+        return response
 
 
+@extend_schema_view(
+    get=extend_schema(
+        summary="Детальная информация о товаре",
+        description="Возвращает полную информацию о товаре по ID.",
+        responses={200: ProductInfoSerializer,
+                   404: {'description': 'Товар не найден'}},
+        tags=['products'],
+    )
+)
 class ProductDetailView(generics.RetrieveAPIView):
     """
     API для получения детальной информации о товаре
@@ -468,6 +763,37 @@ class ProductDetailView(generics.RetrieveAPIView):
         return ProductUtils.get_available_products_queryset()
 
 
+@extend_schema_view(
+    get=extend_schema(
+        summary='Просмотр корзины',
+        description='Возвращает содержимое корзины текущего пользователя.',
+        responses={200: OrderSerializer},
+        tags=['Cart'],
+    ),
+    post=extend_schema(
+        summary='Добавление товара в корзину',
+        description='Добавляет указанный товар в корзину пользователя.',
+        request=AddToCartSerializer,
+        responses={
+            200: OpenApiExample(
+                'Success',
+                value={
+                    'message': 'Товар добавлен в корзину',
+                    'item': {'id': 1, 'product': 42, 'quantity': 1}
+                }
+            ),
+            400: OpenApiExample(
+                'Error',
+                value={'error': 'Товар недоступен для заказа'}
+            ),
+            404: OpenApiExample(
+                'Not Found',
+                value={'error': 'Товар не найден'}
+            ),
+        },
+        tags=['Cart'],
+    ),
+)
 class CartView(BaseUserDataView):
     """
     API для работы с корзиной
@@ -575,6 +901,54 @@ class CartView(BaseUserDataView):
         }, status=status.HTTP_200_OK)
 
 
+@extend_schema_view(
+    put=extend_schema(
+        summary='Изменение количества товара в корзине',
+        description='Обновляет количество указанного товара в корзине.',
+        request=UpdateCartItemSerializer,
+        parameters=[
+            OpenApiParameter(
+                name='item_id',
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.PATH,
+                description='ID позиции в корзине',
+            ),
+        ],
+        responses={
+            200: OpenApiExample(
+                'Success',
+                value={
+                    'message': 'Количество товара обновлено',
+                    'item': {'id': 1, 'product': 42, 'quantity': 3}
+                }
+            ),
+            400: OpenApiExample(
+                'Error',
+                value={'error': 'Доступно только 5 единиц товара'}
+            ),
+        },
+        tags=['Cart'],
+    ),
+    delete=extend_schema(
+        summary='Удаление товара из корзины',
+        description='Удаляет указанный товар из корзины пользователя.',
+        parameters=[
+            OpenApiParameter(
+                name='item_id',
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.PATH,
+                description='ID позиции в корзине',
+            ),
+        ],
+        responses={
+            200: OpenApiExample(
+                'Success',
+                value={'message': 'Товар удален из корзины'}
+            ),
+        },
+        tags=['Cart'],
+    ),
+)
 class CartItemDetailView(BaseUserDataView):
     """
     API для работы с конкретным товаром в корзине
@@ -634,6 +1008,38 @@ class CartItemDetailView(BaseUserDataView):
         )
 
 
+@extend_schema_view(
+    post=extend_schema(
+        summary='Создание заказа из корзины',
+        description=(
+            'Переводит корзину в статус "new" и создаёт заказ. '
+            'Отправляются уведомления на email.'
+        ),
+        request=OrderCreateSerializer,
+        responses={
+            201: OpenApiExample(
+                'Order Created',
+                value={
+                    'detail': 'Заказ успешно создан',
+                    'order_id': 1,
+                    'status': 'new',
+                    'order': {
+                        'id': 1,
+                        'status': 'new',
+                        'contact': 1,
+                        'items': [],
+                        'total': 1500.00
+                    }
+                }
+            ),
+            500: OpenApiExample(
+                'Error',
+                value={'detail': 'Ошибка при создании заказа: ...'}
+            ),
+        },
+        tags=['Orders'],
+    ),
+)
 class OrderCreateView(generics.GenericAPIView):
     """Создание заказа из корзины"""
     permission_classes = [IsAuthenticated]
@@ -676,6 +1082,38 @@ class OrderCreateView(generics.GenericAPIView):
             )
 
 
+@extend_schema_view(
+    post=extend_schema(
+        summary='Подтверждение заказа',
+        description=(
+            'Переводит заказ в статус "confirmed". '
+            'Отправляются уведомления.'
+        ),
+        request=OrderConfirmSerializer,
+        responses={
+            200: OpenApiExample(
+                'Order Confirmed',
+                value={
+                    'detail': 'Заказ успешно подтвержден',
+                    'order_id': 1,
+                    'status': 'confirmed',
+                    'order': {
+                        'id': 1,
+                        'status': 'confirmed',
+                        'contact': 1,
+                        'items': [],
+                        'total': 1500.00
+                    }
+                }
+            ),
+            404: OpenApiExample(
+                'Not Found',
+                value={'detail': 'Заказ не найден'}
+            ),
+        },
+        tags=['Orders'],
+    ),
+)
 class OrderConfirmView(generics.GenericAPIView):
     """Подтверждение заказа"""
     permission_classes = [IsAuthenticated]
@@ -725,6 +1163,18 @@ class OrderConfirmView(generics.GenericAPIView):
             )
 
 
+@extend_schema_view(
+    get=extend_schema(
+        summary='Список заказов пользователя',
+        description='Возвращает все заказы текущего пользователя, '
+                    'исключая корзину (статус basket). Сортировка по дате (сначала новые).',
+        responses={
+            200: OrderListSerializer(many=True),
+            401: OpenApiResponse(description='Не авторизован'),
+        },
+        tags=['Заказы'],
+    )
+)
 class OrderListView(generics.ListAPIView):
     """Список заказов пользователя"""
     permission_classes = [IsAuthenticated]
@@ -736,6 +1186,27 @@ class OrderListView(generics.ListAPIView):
         ).exclude(status='basket').order_by('-dt')
 
 
+@extend_schema_view(
+    get=extend_schema(
+        summary='Детальная информация о заказе',
+        description='Возвращает полную информацию о заказе, '
+                    'включая список товаров, контакт и статус.',
+        parameters=[
+            OpenApiParameter(
+                name='pk',
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.PATH,
+                description='ID заказа',
+            ),
+        ],
+        responses={
+            200: OrderDetailSerializer,
+            401: OpenApiResponse(description='Не авторизован'),
+            404: OpenApiResponse(description='Заказ не найден'),
+        },
+        tags=['Заказы'],
+    )
+)
 class OrderDetailView(generics.RetrieveAPIView):
     """Детальная информация о заказе"""
     permission_classes = [IsAuthenticated]
@@ -747,6 +1218,27 @@ class OrderDetailView(generics.RetrieveAPIView):
         ).exclude(status='basket')
 
 
+@extend_schema(
+    summary="Получить или обновить телефон пользователя",
+    description="GET: возвращает текущий телефон. "
+                "POST: создаёт или обновляет телефон.",
+    request=PhoneSerializer,
+    responses={
+        200: inline_serializer(
+            name='PhoneResponse',
+            fields={
+                'detail': OpenApiTypes.STR,
+                'phone': PhoneSerializer()
+            }
+        ),
+        404: inline_serializer(
+            name='PhoneNotFound',
+            fields={'detail': OpenApiTypes.STR}
+        )
+    },
+    methods=['GET', 'POST'],
+    tags=['User Profile']
+)
 class PhoneView(generics.GenericAPIView):
     """
     API для работы с телефоном пользователя
@@ -786,6 +1278,28 @@ class PhoneView(generics.GenericAPIView):
         )
 
 
+@extend_schema_view(
+    get=extend_schema(
+        summary='Список контактов',
+        description='Возвращает все контакты текущего пользователя.',
+        responses={
+            200: ContactSerializer(many=True),
+            401: OpenApiResponse(description='Не авторизован'),
+        },
+        tags=['Контакты'],
+    ),
+    post=extend_schema(
+        summary='Создать контакт',
+        description='Создаёт новый контакт для текущего пользователя.',
+        request=ContactSerializer,
+        responses={
+            201: ContactSerializer,
+            400: OpenApiResponse(description='Ошибка валидации'),
+            401: OpenApiResponse(description='Не авторизован'),
+        },
+        tags=['Контакты'],
+    ),
+)
 class ContactViewSet(generics.ListCreateAPIView):
     """Представление для работы с контактами"""
 
@@ -801,6 +1315,39 @@ class ContactViewSet(generics.ListCreateAPIView):
         serializer.save(user=self.request.user)
 
 
+@extend_schema_view(
+    get=extend_schema(
+        summary="Получить контакт",
+        responses={200: ContactSerializer},
+        tags=['Contacts']
+    ),
+    put=extend_schema(
+        summary="Обновить контакт (полное)",
+        request=ContactSerializer,
+        responses={200: ContactSerializer},
+        tags=['Contacts']
+    ),
+    patch=extend_schema(
+        summary="Частично обновить контакт",
+        request=ContactSerializer,
+        responses={200: ContactSerializer},
+        tags=['Contacts']
+    ),
+    delete=extend_schema(
+        summary="Удалить контакт",
+        responses={
+            200: inline_serializer(
+                name='ContactDeleted',
+                fields={'detail': OpenApiTypes.STR}
+            ),
+            400: inline_serializer(
+                name='ContactInUse',
+                fields={'detail': OpenApiTypes.STR}
+            )
+        },
+        tags=['Contacts']
+    )
+)
 class ContactDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
     API для работы с конкретным контактом
@@ -834,6 +1381,26 @@ class ContactDetailView(generics.RetrieveUpdateDestroyAPIView):
         )
 
 
+@extend_schema_view(
+    patch=extend_schema(
+        summary='Изменить права доступа магазина',
+        description='Владелец магазина может изменить '
+                    'параметр permissions_order для своего магазина.',
+        parameters=[
+            OpenApiParameter('pk', OpenApiTypes.INT, OpenApiParameter.PATH,
+                             description='ID магазина'),
+        ],
+        request=ShopPermissionSerializer,
+        responses={
+            200: ShopPermissionSerializer,
+            400: OpenApiResponse(description='Ошибка валидации'),
+            401: OpenApiResponse(description='Не авторизован'),
+            403: OpenApiResponse(description='Недостаточно прав'),
+            404: OpenApiResponse(description='Магазин не найден'),
+        },
+        tags=['Магазины'],
+    ),
+)
 class ShopPermissionUpdateView(APIView):
     """API для владельца магазина:
     изменение доступа к заказам (permissions_order)."""
@@ -856,6 +1423,27 @@ class ShopPermissionUpdateView(APIView):
                             status=status.HTTP_404_NOT_FOUND)
 
 
+@extend_schema_view(
+    get=extend_schema(
+        summary='Заказы магазинов владельца',
+        description='Возвращает заказы, содержащие товары '
+                    'из магазинов, принадлежащих текущему пользователю.',
+        responses={
+            200: ShopOrderListSerializer(many=True),
+            401: OpenApiResponse(description='Не авторизован'),
+            404: OpenApiResponse(
+                description='У вас нет магазинов',
+                examples=[
+                    OpenApiExample(
+                        'Пример',
+                        value={'detail': 'У вас нет магазинов.'},
+                    )
+                ],
+            ),
+        },
+        tags=['Магазины'],
+    ),
+)
 class ShopOrderListView(APIView):
     """API для владельца магазина:
     получение списка заказов с товарами из его магазинов."""
@@ -881,6 +1469,67 @@ class ShopOrderListView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+@extend_schema_view(
+    retrieve=extend_schema(
+        summary="Получить аватар пользователя",
+        responses={200: AvatarSerializer},
+        tags=['User Profile']
+    ),
+    upload=extend_schema(
+        summary="Загрузить аватар",
+        description="Загружает изображение аватара (JPEG, PNG, WebP, до 5 МБ).",
+        request=inline_serializer(
+            name='AvatarUpload',
+            fields={
+                'avatar': OpenApiTypes.BINARY
+            }
+        ),
+        responses={
+            200: inline_serializer(
+                name='AvatarUploadResponse',
+                fields={
+                    'status': OpenApiTypes.STR,
+                    'message': OpenApiTypes.STR,
+                    'data': AvatarSerializer()
+                }
+            )
+        },
+        methods=['POST'],
+        examples=[
+            OpenApiExample(
+                'Valid Upload',
+                summary='Загрузка аватара',
+                value={
+                    "avatar": "file://avatar.png"
+                },
+                request_only=True,
+                response_only=False
+            )
+        ],
+        tags=['User Profile']
+    ),
+    delete_avatar=extend_schema(
+        summary="Удалить аватар",
+        responses={
+            200: inline_serializer(
+                name='AvatarDeleted',
+                fields={
+                    'status': OpenApiTypes.STR,
+                    'message': OpenApiTypes.STR
+                }
+            ),
+            404: inline_serializer(
+                name='AvatarNotFound',
+                fields={
+                    'status': OpenApiTypes.STR,
+                    'message': OpenApiTypes.STR
+                }
+            )
+        },
+        methods=['DELETE'],
+        tags=['User Profile']
+    )
+)
 class AvatarViewSet(viewsets.ViewSet):
     """
     API для управления аватаром пользователя.
@@ -889,7 +1538,8 @@ class AvatarViewSet(viewsets.ViewSet):
     * Пользователь может управлять только СВОИМ аватаром.
     """
     permission_classes = [IsAuthenticated]
-    parser_classes = [parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser]
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser,
+                      parsers.JSONParser]
 
     def get_serializer_class(self):
         return AvatarSerializer
@@ -929,7 +1579,7 @@ class AvatarViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['delete'], url_path='delete')
     def delete_avatar(self, request):
         """
-        DELETE /api/v1/avatar/delete/ — удалить аватар.
+        DELETE /api/avatar/delete/ — удалить аватар.
         """
         user = request.user
         if user.avatar:
@@ -950,22 +1600,159 @@ class AvatarViewSet(viewsets.ViewSet):
         )
 
 
+@extend_schema_view(
+    list=extend_schema(
+        summary="Список изображений товаров",
+        responses={200: ProductImageListSerializer(many=True)},
+        tags=['Product Images']
+    ),
+    retrieve=extend_schema(
+        summary="Получить изображение товара",
+        responses={200: ProductImageListSerializer},
+        tags=['Product Images']
+    ),
+    create=extend_schema(
+        summary="Загрузить изображение товара",
+        request=ProductImageUploadSerializer,
+        responses={201: ProductImageListSerializer},
+        tags=['Product Images']
+    ),
+    update=extend_schema(
+        summary="Обновить изображение товара",
+        request=ProductImageUpdateSerializer,
+        responses={200: ProductImageListSerializer},
+        tags=['Product Images']
+    ),
+    partial_update=extend_schema(
+        summary="Частично обновить изображение товара",
+        request=ProductImageUpdateSerializer,
+        responses={200: ProductImageListSerializer},
+        tags=['Product Images']
+    ),
+    destroy=extend_schema(
+        summary="Удалить изображение товара",
+        responses={204: None},
+        tags=['Product Images']
+    ),
+    by_product=extend_schema(
+        summary="Получить все изображения товара",
+        description="Возвращает все изображения для указанного ProductInfo.",
+        responses={
+            200: inline_serializer(
+                name='ProductImagesResponse',
+                fields={
+                    'product_info_id': OpenApiTypes.INT,
+                    'product_name': OpenApiTypes.STR,
+                    'count': OpenApiTypes.INT,
+                    'results': ProductImageListSerializer(many=True)
+                }
+            )
+        },
+        parameters=[
+            OpenApiParameter(
+                name='product_info_id',
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.PATH,
+                required=True,
+                description="ID ProductInfo"
+            )
+        ],
+        tags=['Product Images']
+    ),
+    bulk_upload=extend_schema(
+        summary="Массовая загрузка изображений товара",
+        description="Загружает несколько изображений для одного товара. "
+                    "Поддерживает multipart/form-data.",
+        request=ProductImageBulkUploadSerializer,
+        responses={
+            201: inline_serializer(
+                name='BulkUploadSuccess',
+                fields={
+                    'status': OpenApiTypes.STR,
+                    'product_info_id': OpenApiTypes.INT,
+                    'total_uploaded': OpenApiTypes.INT,
+                    'created': OpenApiTypes.INT,
+                    'errors': OpenApiTypes.INT,
+                    'image_ids': list,
+                    'error_details': OpenApiTypes.OBJECT
+                }
+            ),
+            207: inline_serializer(
+                name='BulkUploadPartial',
+                fields={
+                    'status': OpenApiTypes.STR,
+                    'product_info_id': OpenApiTypes.INT,
+                    'total_uploaded': OpenApiTypes.INT,
+                    'created': OpenApiTypes.INT,
+                    'errors': OpenApiTypes.INT,
+                    'image_ids': list,
+                    'error_details': OpenApiTypes.OBJECT
+                }
+            )
+        },
+        methods=['POST'],
+        examples=[
+            OpenApiExample(
+                'Bulk Upload Example',
+                summary='Пример массовой загрузки',
+                value={
+                    "product_info": 123,
+                    "images": [
+                        "file://img1.jpg",
+                        "file://img2.png"
+                    ],
+                    "alt_text": "Описание изображений"
+                },
+                request_only=True
+            )
+        ],
+        tags=['Product Images']
+    ),
+    set_main=extend_schema(
+        summary="Установить изображение как главное",
+        responses={
+            200: inline_serializer(
+                name='SetMainSuccess',
+                fields={
+                    'status': OpenApiTypes.STR,
+                    'message': OpenApiTypes.STR
+                }
+            )
+        },
+        methods=['POST'],
+        tags=['Product Images']
+    ),
+    regenerate=extend_schema(
+        summary="Перегенерировать миниатюры изображения",
+        responses={
+            200: inline_serializer(
+                name='RegenerateSuccess',
+                fields={
+                    'status': OpenApiTypes.STR,
+                    'message': OpenApiTypes.STR
+                }
+            )
+        },
+        methods=['POST'],
+        tags=['Product Images']
+    )
+)
 class ProductImageViewSet(viewsets.ModelViewSet):
     """
     API для управления изображениями товаров.
 
-    list        → GET    /api/v1/product-images/
-    retrieve    → GET    /api/v1/product-images/{id}/
-    create      → POST   /api/v1/product-images/          (загрузить одно)
-    update      → PUT    /api/v1/product-images/{id}/
-    partial_update → PATCH /api/v1/product-images/{id}/
-    destroy     → DELETE /api/v1/product-images/{id}/
+    list        → GET    /api/product-images/
+    retrieve    → GET    /api/product-images/{id}/
+    create      → POST   /api/product-images/          (загрузить одно)
+    update      → PUT    /api/product-images/{id}/
+    partial_update → PATCH /api/product-images/{id}/
+    destroy     → DELETE /api/product-images/{id}/
 
     Дополнительные endpoints:
-    - GET  /api/v1/product-images/by-product/{product_info_id}/
-    - POST /api/v1/product-images/bulk-upload/
-    - POST /api/v1/product-images/{id}/set-main/
-    - POST /api/v1/product-images/{id}/regenerate/
+    - GET  /api/product-images/by-product/{product_info_id}/
+    - POST /api/product-images/bulk-upload/
+    - POST /api/product-images/{id}/set-main/
+    - POST /api/product-images/{id}/regenerate/
     """
     queryset = ProductImage.objects.all()
     permission_classes = [IsAuthenticatedOrReadOnly]
@@ -1000,7 +1787,7 @@ class ProductImageViewSet(viewsets.ModelViewSet):
             url_path='by-product/(?P<product_info_id>[^/.]+)')
     def by_product(self, request, product_info_id=None):
         """
-        GET /api/v1/product-images/by-product/{product_info_id}/
+        GET /api/product-images/by-product/{product_info_id}/
         Возвращает ВСЕ изображения указанного товара.
         """
         product_info = get_object_or_404(ProductInfo, id=product_info_id)
@@ -1018,7 +1805,7 @@ class ProductImageViewSet(viewsets.ModelViewSet):
             parser_classes=[parsers.MultiPartParser, parsers.FormParser])
     def bulk_upload(self, request):
         """
-        POST /api/v1/product-images/bulk-upload/
+        POST /api/product-images/bulk-upload/
         Множественная загрузка изображений для одного товара.
 
         Загружает все файлы, затем запускает ОДНУ Celery-задачу на всю пачку.
@@ -1038,7 +1825,8 @@ class ProductImageViewSet(viewsets.ModelViewSet):
                 img_instance = ProductImage.objects.create(
                     product_info=product_info,
                     original=image_file,
-                    alt_text=alt_text or f'Изображение {idx + 1} товара {product_info.full_name}',
+                    alt_text=alt_text or f'Изображение {idx + 1} товара '
+                                         f'{product_info.full_name}',
                     sort_order=idx,
                     is_main=(idx == 0 and not ProductImage.objects.filter(
                         product_info=product_info, is_main=True
@@ -1065,12 +1853,14 @@ class ProductImageViewSet(viewsets.ModelViewSet):
             'image_ids': created_ids,
             'error_details': errors if errors else None,
         },
-            status=status.HTTP_201_CREATED if not errors else status.HTTP_207_MULTI_STATUS)
+            status=(status.HTTP_201_CREATED if not errors else
+                    status.HTTP_207_MULTI_STATUS)
+        )
 
     @action(detail=True, methods=['post'], url_path='set-main')
     def set_main(self, request, pk=None):
         """
-        POST /api/v1/product-images/{id}/set-main/
+        POST /api/product-images/{id}/set-main/
         Устанавливает данное изображение как главное для товара.
         """
         image = self.get_object()
@@ -1084,13 +1874,14 @@ class ProductImageViewSet(viewsets.ModelViewSet):
 
         return Response({
             'status': 'success',
-            'message': f'Изображение {image.id} теперь главное для товара "{image.product_info.full_name}"'
+            'message': f'Изображение {image.id} теперь главное для товара '
+                       f'"{image.product_info.full_name}"'
         })
 
     @action(detail=True, methods=['post'], url_path='regenerate')
     def regenerate(self, request, pk=None):
         """
-        POST /api/v1/product-images/{id}/regenerate/
+        POST /api/product-images/{id}/regenerate/
         Принудительно перегенерировать миниатюры для изображения.
         """
         image = self.get_object()

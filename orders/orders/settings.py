@@ -12,6 +12,8 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 import os
+
+from django.conf.global_settings import STATICFILES_DIRS
 from dotenv import load_dotenv
 from pathlib import Path
 import dj_database_url
@@ -44,22 +46,24 @@ ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '*').split(',')
 # Application definition
 
 INSTALLED_APPS = [
-    # 'jet',
-    # 'jet.dashboard',
+    'django.contrib.staticfiles',
+    'jet',
+    'jet.dashboard',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
-    'django.contrib.staticfiles',
     'rest_framework',
     'rest_framework.authtoken',
     'django_rest_passwordreset',
+    'cacheops',
     'backend',
     'imagekit',
     'drf_spectacular',
     'drf_spectacular_sidecar',
     'social_django',
+    'orders'
 ]
 
 MIDDLEWARE = [
@@ -129,8 +133,16 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+# STATICFILES_DIRS = [
+#     BASE_DIR / 'static',
+# ]
+
+STATICFILES_FINDERS = [
+    'django.contrib.staticfiles.finders.FileSystemFinder',
+    'django.contrib.staticfiles.finders.AppDirectoriesFinder',
+]
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
@@ -284,7 +296,7 @@ LOGIN_URL = '/api/social-auth/login/yandex-oauth2/'
 
 
 # Django JET — настройки админ-панели
-JET_DEFAULT_THEME = 'light-gray'
+JET_DEFAULT_THEME = 'dark'
 
 JET_SIDE_MENU_COMPACT = True
 JET_CHANGE_FORM_SIBLING_LINKS = True
@@ -301,9 +313,9 @@ JET_APP_INDEX_DASHBOARD = 'orders.dashboard.CustomIndexDashboard'
 # Темы оформления
 JET_THEMES = [
     {
-        'theme': 'default',
-        'color': '#47bac1',
-        'title': 'По умолчанию',
+        'theme': 'dark',
+        'color': '#1a1a2e',
+        'title': 'Тёмная',
     },
     {
         'theme': 'green',
@@ -315,22 +327,12 @@ JET_THEMES = [
         'color': '#ffffff',
         'title': 'Светлая',
     },
-    {
-        'theme': 'dark',
-        'color': '#1a1a2e',
-        'title': 'Тёмная',
-    },
-    {
-        'theme': 'light-gray',
-        'color': '#f0f0f0',
-        'title': 'Светло-серая',
-    },
 ]
+
 
 # Sentry — мониторинг ошибок
 SENTRY_DSN = os.getenv('SENTRY_DSN', '')
 SENTRY_ENVIRONMENT = 'development' if DEBUG else 'production'
-
 
 def _strip_sensitive_data(event, hint):
     """Удаляем пароли, токены и ключи из данных перед отправкой в Sentry"""
@@ -351,7 +353,6 @@ def _strip_sensitive_data(event, hint):
 
     return event
 
-
 def _before_sentry_send(event, hint):
     """
     Фильтр событий перед отправкой в Sentry.
@@ -366,14 +367,11 @@ def _before_sentry_send(event, hint):
             return None
         if exc_type == Throttled:
             return None
-
     return event
-
 
 if SENTRY_DSN:
     sentry_sdk.init(
         dsn=SENTRY_DSN,
-
         integrations=[
             DjangoIntegration(
                 transaction_style='url',
@@ -385,7 +383,6 @@ if SENTRY_DSN:
                 event_level=None,
             ),
         ],
-
         environment=SENTRY_ENVIRONMENT,
         release='orders-api@1.0.0',
 
@@ -395,7 +392,7 @@ if SENTRY_DSN:
         send_default_pii=False,
         max_breadcrumbs=50,
 
-        # ⬇️⬇️⬇️ Цепочка фильтров ⬇️⬇️⬇️
+        # Цепочка фильтров
         before_send=lambda event, hint: _strip_sensitive_data(
             _before_sentry_send(event, hint),
             hint
@@ -408,7 +405,8 @@ if SENTRY_DSN:
 CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
 
 # Бэкенд для хранения результатов выполнения задач
-CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND',
+                                  'redis://localhost:6379/0')
 
 # Формат сериализации
 CELERY_ACCEPT_CONTENT = ['json']
@@ -458,4 +456,67 @@ CELERY_BEAT_SCHEDULE = {
     },
 }
 
-# ========== END CELERY BEAT SCHEDULE ==========
+# Redis — бэкенд для кэша
+
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': os.getenv('REDIS_URL', 'redis://localhost:6379/1'),
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'SOCKET_CONNECT_TIMEOUT': 5,
+            'SOCKET_TIMEOUT': 5,
+            'COMPRESSOR': 'django_redis.compressors.zlib.ZlibCompressor',
+            'PARSER_CLASS': 'redis.connection.HiredisParser',
+        },
+        'KEY_PREFIX': 'myproject',
+        'TIMEOUT': 60 * 15,  # 15 минут по умолчанию
+    }
+}
+
+# Cacheops — автоматическое кэширование запросов
+
+CACHEOPS_REDIS = os.getenv('REDIS_URL', 'redis://localhost:6379/1')
+
+CACHEOPS = {
+    # Магазины — кэшируем всё на 30 минут
+    'backend.shop': {
+        'ops': 'all',
+        'timeout': 60 * 30,
+    },
+    # Категории — кэшируем всё на 30 минут
+    'backend.category': {
+        'ops': 'all',
+        'timeout': 60 * 30,
+    },
+    # Информация о товарах — кэшируем всё на 10 минут
+    'backend.productinfo': {
+        'ops': 'all',
+        'timeout': 60 * 10,
+    },
+    # Модель Product (основная) — кэшируем всё на 10 минут
+    'backend.product': {
+        'ops': 'all',
+        'timeout': 60 * 10,
+    },
+    # Параметры товаров — кэшируем на 10 минут
+    'backend.productparameter': {
+        'ops': 'all',
+        'timeout': 60 * 10,
+    },
+    # Остальные модели backend — кэшируем только get и fetch на 5 минут
+    'backend.': {
+        'ops': ('get', 'fetch'),
+        'timeout': 60 * 5,
+    },
+    # Админку, auth, сессии и соцсети не кэшируем
+    'auth.*': None,
+    'admin.*': None,
+    'sessions.*': None,
+    'contenttypes.*': None,
+    'social_django.*': None,
+}
+
+# Время жизни кэша по умолчанию (если не указано в CACHEOPS)
+CACHEOPS_DEGRADE_ON_FAILURE = True   # если Redis упал — продолжаем без кэша
+CACHEOPS_ENABLED = True              # включить кэширование
