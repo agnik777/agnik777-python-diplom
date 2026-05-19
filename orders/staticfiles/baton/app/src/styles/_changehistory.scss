@@ -1,0 +1,23 @@
+// scss-lint:disable IdSelector PlaceholderInExtend NestingDepth QualifyingElement SelectorDepth ImportantRule
+body.page-changehistory #content-main {
+  @extend .container-fluid;
+
+  > .module {
+    @extend .p-3;
+    @extend .table-responsive;
+    background: var(--bs-baton-changehistory-bg);
+    border: 1px solid var(--bs-baton-changehistory-border-color);
+    margin-top: 15px;
+
+    table {
+      @extend .table;
+      @extend .table-striped;
+      margin-bottom: 0;
+
+      td,
+      th {
+        padding: 0.3rem;
+      }
+    }
+  }
+}

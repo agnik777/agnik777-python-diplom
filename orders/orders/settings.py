@@ -47,27 +47,28 @@ ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '*').split(',')
 
 INSTALLED_APPS = [
     'django.contrib.staticfiles',
-    'jet',
-    'jet.dashboard',
+    'baton',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
+
     'rest_framework',
     'rest_framework.authtoken',
     'django_rest_passwordreset',
     'cacheops',
-    'backend',
     'imagekit',
     'drf_spectacular',
     'drf_spectacular_sidecar',
     'social_django',
-    'orders'
+    'backend',
+    'baton.autodiscover',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # 'baton.middleware.BatonAuthenticationMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -85,9 +86,11 @@ TEMPLATES = [
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
+                'django.template.context_processors.debug',
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                # 'baton.context_processors',
             ],
         },
     },
@@ -97,7 +100,7 @@ WSGI_APPLICATION = 'orders.wsgi.application'
 
 DATABASES = {
     'default': dj_database_url.config(
-        default='sqlite:///db.sqlite3',  # fallback, если переменной нет
+        default='sqlite:///db.sqlite3',
         conn_max_age=600,                # опциональный пул соединений
         ssl_require=False,               # True для продакшена
     )
@@ -135,9 +138,9 @@ USE_TZ = True
 
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
-# STATICFILES_DIRS = [
-#     BASE_DIR / 'static',
-# ]
+STATICFILES_DIRS = [
+    BASE_DIR / 'static',
+]
 
 STATICFILES_FINDERS = [
     'django.contrib.staticfiles.finders.FileSystemFinder',
@@ -243,18 +246,18 @@ YAML_ALLOWED_MIME_TYPES = [
 # Настройки для парсинга YAML
 YAML_LOADER = 'yaml.SafeLoader'  # Безопасный загрузчик
 
-# Настройки social-auth
-AUTHENTICATION_BACKENDS = (
-    'social_core.backends.yandex.YandexOAuth2',
-    'django.contrib.auth.backends.ModelBackend',
-)
-
 # django-imagekit — асинхронная генерация миниатюр
 IMAGEKIT_DEFAULT_CACHEFILE_BACKEND = 'imagekit.cachefiles.backends.Async'
 IMAGEKIT_DEFAULT_CACHEFILE_STRATEGY = 'imagekit.cachefiles.strategies.Optimistic'
 
 # Настройки кеша (опционально, для хранения сгенерированных миниатюр)
 IMAGEKIT_CACHEFILE_DIR = 'cache/images'
+
+# Настройки social-auth
+AUTHENTICATION_BACKENDS = (
+    'social_core.backends.yandex.YandexOAuth2',
+    'django.contrib.auth.backends.ModelBackend',
+)
 
 # Яндекс OAuth
 SOCIAL_AUTH_YANDEX_OAUTH2_KEY = os.getenv('YANDEX_APP_ID', '')
@@ -293,42 +296,6 @@ SOCIAL_AUTH_PIPELINE = (
 # URL-префикс для social-auth
 SOCIAL_AUTH_URL_NAMESPACE = 'social'
 LOGIN_URL = '/api/social-auth/login/yandex-oauth2/'
-
-
-# Django JET — настройки админ-панели
-JET_DEFAULT_THEME = 'dark'
-
-JET_SIDE_MENU_COMPACT = True
-JET_CHANGE_FORM_SIBLING_LINKS = True
-JET_CHANGE_FORM_SIBLING_LINKS_DEPTH = 2
-
-JET_SORTABLE_LIST = True
-JET_FILTERS_DATE_RANGE_PICKER = True
-JET_SHOW_FULL_NAME = True
-
-# Кастомная панель управления (dashboard)
-JET_INDEX_DASHBOARD = 'orders.dashboard.CustomIndexDashboard'
-JET_APP_INDEX_DASHBOARD = 'orders.dashboard.CustomIndexDashboard'
-
-# Темы оформления
-JET_THEMES = [
-    {
-        'theme': 'dark',
-        'color': '#1a1a2e',
-        'title': 'Тёмная',
-    },
-    {
-        'theme': 'green',
-        'color': '#44b78b',
-        'title': 'Зелёная',
-    },
-    {
-        'theme': 'light',
-        'color': '#ffffff',
-        'title': 'Светлая',
-    },
-]
-
 
 # Sentry — мониторинг ошибок
 SENTRY_DSN = os.getenv('SENTRY_DSN', '')
@@ -520,3 +487,150 @@ CACHEOPS = {
 # Время жизни кэша по умолчанию (если не указано в CACHEOPS)
 CACHEOPS_DEGRADE_ON_FAILURE = True   # если Redis упал — продолжаем без кэша
 CACHEOPS_ENABLED = True              # включить кэширование
+
+# ========== DJANGO-BATON CONFIGURATION ==========
+
+BATON = {
+    # --------------------------
+    # 🌐 Внешний вид и брендинг
+    # --------------------------
+    'SITE_HEADER': 'Orders Admin Panel',
+    'SITE_TITLE': 'Orders Admin',
+    'INDEX_TITLE': 'Панель управления заказами',
+    'SUPPORT_HREF': 'https://t.me/your_support',  # ссылка на поддержку
+    'COPYRIGHT': '© 2026 Orders API Team',         # копирайт в подвале
+
+    # --------------------------
+    # 🎨 Тема оформления
+    # --------------------------
+    'THEME': 'default',          # 'default' | 'dark-blue' | 'sand' | 'green'
+                                 # можно также 'cerulean', 'cosmo', 'flatly', 'journal',
+                                 # 'litera', 'lumen', 'lux', 'materia', 'minty',
+                                 # 'pulse', 'sandstone', 'simplex', 'sketchy',
+                                 # 'slate', 'solar', 'spacelab', 'superhero',
+                                 # 'united', 'yeti'
+    'THEME_TOGGLE': 'default',   # показывать кнопку переключения темы
+                                 # 'default' — список из 4 предустановленных тем
+                                 # 'all' — все доступные темы
+                                 # False — отключить
+
+    # --------------------------
+    # 📌 Collapsible сайдбар (боковое меню)
+    # --------------------------
+    'MENU_ALWAYS_COLLAPSED': False,         # меню свёрнуто по умолчанию
+    'MENU_TITLE': 'Меню',                   # заголовок меню
+    'MENU_ICONS': {                         # иконки для моделей (Font Awesome 5)
+        'User': 'fas fa-user',
+        'Shop': 'fas fa-store',
+        'Category': 'fas fa-tags',
+        'Product': 'fas fa-box',
+        'ProductInfo': 'fas fa-info-circle',
+        'Parameter': 'fas fa-sliders-h',
+        'ProductParameter': 'fas fa-cog',
+        'Contact': 'fas fa-address-card',
+        'Phone': 'fas fa-phone',
+        'Order': 'fas fa-shopping-cart',
+        'OrderItem': 'fas fa-receipt',
+        'ConfirmEmailToken': 'fas fa-envelope',
+        'ProductImage': 'fas fa-image',
+        'Group': 'fas fa-users-cog',
+        'LogEntry': 'fas fa-history',
+    },
+
+    # --------------------------
+    # 📂 Группировка приложений в сайдбаре
+    # --------------------------
+    'MENU_ORDER': [                     # порядок и группировка
+        {
+            'label': 'Пользователи',
+            'icon': 'fas fa-user-friends',
+            'models': [
+                'backend.User',
+                'backend.Contact',
+                'backend.Phone',
+                'backend.ConfirmEmailToken',
+                'auth.Group',
+            ]
+        },
+        {
+            'label': 'Товары и каталог',
+            'icon': 'fas fa-boxes',
+            'models': [
+                'backend.Shop',
+                'backend.Category',
+                'backend.Product',
+                'backend.ProductInfo',
+                'backend.Parameter',
+                'backend.ProductParameter',
+                'backend.ProductImage',
+            ]
+        },
+        {
+            'label': 'Заказы',
+            'icon': 'fas fa-truck',
+            'models': [
+                'backend.Order',
+                'backend.OrderItem',
+            ]
+        },
+        {
+            'label': 'Логи и аудит',
+            'icon': 'fas fa-clipboard-list',
+            'models': [
+                'admin.LogEntry',
+            ]
+        },
+    ],
+
+    # --------------------------
+    # 🧩 Фильтры как select2 (удобный поиск)
+    # --------------------------
+    'SELECT2': True,                     # все ForeignKey/ManyToMany поля станут select2
+    'SELECT2_CSS': True,                 # подключить CSS для select2
+    'SELECT2_JS': True,                  # подключить JS для select2
+
+    # --------------------------
+    # 🎯 Collapsible inline-блоки
+    # --------------------------
+    'COLLAPSABLE_INLINE_ADMIN': True,    # inline-формы можно сворачивать
+    'INLINE_COLLAPSED': False,           # по умолчанию inline не свёрнуты
+
+    # --------------------------
+    # 📊 Показывать тоггл для фильтров
+    # --------------------------
+    'SHOW_FILTERS_TOGGLE': True,         # кнопка "Показать/скрыть фильтры"
+
+    # --------------------------
+    # 🔍 Дополнительные настройки
+    # --------------------------
+    'SEARCH_FIELD': {
+        'placeholder': 'Поиск по всей админке...',
+        'submit_btn': 'Найти',
+    },
+
+    # --------------------------
+    # 🗑️ Подтверждение массовых действий
+    # --------------------------
+    'CONFIRM_CHANGES': True,             # подтверждение перед массовыми изменениями
+    'CONFIRM_DELETE': True,              # красивое модальное окно подтверждения удаления
+
+    # --------------------------
+    # 🖼️ Аватарка пользователя (если есть поле avatar)
+    # --------------------------
+    'GRAVATAR_DEFAULT_IMAGE': 'mp',      # 'mp' — mystery person
+    'GRAVATAR_ENABLED': False,           # используем свой avatar, не Gravatar
+    'AVATAR_FIELD': 'avatar',            # поле модели User, где хранится аватар
+    'AVATAR_URL_FIELD': 'avatar_url',    # поле с URL аватара (если есть)
+
+    # --------------------------
+    # 📱 Адаптивность
+    # --------------------------
+    'MOBILE_FILTERS': True,              # фильтры в мобильной версии через выпадающий список
+    'MOBILE_HORIZONTAL': True,           # горизонтальная навигация на мобильных
+
+    # --------------------------
+    # 🔧 Экспериментальные функции
+    # --------------------------
+    'CHANGELIST_FILTERS_IN_MODAL': True, # фильтры в модальном окне (удобно при малом экране)
+    'CHANGEFORM_FIXED_SUBMIT_ROW': True, # зафиксировать кнопки "Сохранить" внизу
+}

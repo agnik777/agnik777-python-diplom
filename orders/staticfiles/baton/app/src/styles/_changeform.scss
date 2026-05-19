@@ -1,0 +1,212 @@
+// scss-lint:disable IdSelector PlaceholderInExtend NestingDepth QualifyingElement SelectorDepth ImportantRule
+.change-form {
+  #content {
+    form {
+      @extend %admin-form;
+    }
+  }
+
+  #content-main {
+    @extend .container-fluid;
+  }
+
+  h2 {
+    font-size: $h2-size;
+  }
+
+  .object-tools {
+    .historylink {
+      &::before {
+        content: 'history';
+        vertical-align: middle;
+      }
+    }
+
+    .viewsitelink {
+      &::before {
+        content: 'desktop_windows';
+      }
+    }
+  }
+
+  input[type='text'].hidden {
+    display: none !important;
+  }
+
+  .baton-image-preview {
+    height: 100px;
+
+    &:hover {
+      animation: bounce 0.1s;
+      animation-direction: alternate;
+      animation-iteration-count: 4;
+    }
+  }
+
+  .collapse-entry {
+    summary {
+      // Django 5.1
+      display: block;
+    }
+
+    h2 {
+      /* django 5.1 uses a h2 */
+      cursor: pointer;
+      margin: 0.5rem 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+
+      .entry-collapse-toggler {
+        margin-left: auto !important;
+        order: 1;
+
+        &::before {
+          color: var(--bs-baton-changeform-collapse-entry-icon-color);
+          @extend %material;
+          content: 'visibility_off';
+        }
+
+        & + span {
+          margin-left: auto;
+        }
+      }
+    }
+
+    details[open] h2 .entry-collapse-toggler::before {
+      content: 'visibility_off';
+    }
+
+    details:not([open]) h2 .entry-collapse-toggler::before {
+      content: 'visibility';
+    }
+
+    h3 {
+      /* django 5.1 uses a h2 */
+      cursor: pointer;
+      margin: 0.5rem 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+
+      .entry-collapse-toggler {
+        order: 1;
+
+        &::before {
+          color: var(--bs-baton-changeform-collapse-entry-icon-color);
+          @extend %material;
+          content: 'visibility_off';
+        }
+
+        & + span {
+          margin-left: auto;
+        }
+      }
+
+      &.entry-collapsed {
+        ~ fieldset {
+          display: none !important;
+        }
+
+        .entry-collapse-toggler {
+          &::before {
+            content: 'visibility';
+          }
+        }
+      }
+    }
+  }
+
+  .collapse-entry .last-related, // do not collapse the newly added row
+  .expand-first .inline-related[id$="-0"] {
+    h3 {
+      .entry-collapse-toggler {
+        &::before {
+          content: 'visibility';
+        }
+      }
+
+      ~ fieldset {
+        display: none !important;
+      }
+
+      &.entry-collapsed {
+        .entry-collapse-toggler {
+          &::before {
+            content: 'visibility_off';
+          }
+        }
+
+        ~ fieldset {
+          display: block !important;
+        }
+      }
+    }
+  }
+}
+
+.spinner-overlay {
+  align-items: center;
+  background: var(--bs-baton-changeform-spinner-overlay-bg);
+  bottom: 0;
+  color: var(--bs-baton-changeform-spinner-overlay-color);
+  display: flex;
+  height: 100%;
+  justify-content: center;
+  left: 0;
+  position: fixed;
+  right: 0;
+  text-align: center;
+  top: 0;
+  width: 100%;
+  z-index: 2000;
+
+  p {
+    font-size: 2rem;
+    font-weight: 400;
+  }
+}
+
+// tabs
+.nav-tabs {
+  .nav-link {
+    cursor: pointer;
+
+    &:hover {
+      color: var(--bs-nav-link-hover-color);
+      text-decoration: none;
+    }
+
+    &.active {
+      font-weight: bold;
+    }
+  }
+}
+
+.submit-row + .nav-tabs {
+  margin-top: 1rem;
+}
+
+.tab-content {
+  // padding-top: 1rem;
+}
+
+.baton-form-include {
+  display: block;
+  min-width: 100%;
+}
+
+.baton-form-include-right {
+  display: inline-block !important;
+  min-width: auto !important;
+  vertical-align: top !important;
+}
+
+.change-form #content-main > form .form-row > div.baton-form-include {
+  display: block;
+}
+
+// tinymce
+.tox.tox-tinymce {
+  @extend .mb-2;
+}

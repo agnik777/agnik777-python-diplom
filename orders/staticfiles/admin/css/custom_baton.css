@@ -1,0 +1,124 @@
+/* ============================
+   Кастомный CSS для Baton
+   ============================ */
+
+/* --- Брендирование шапки --- */
+.baton-header .baton-brand {
+    font-weight: 700;
+    font-size: 1.2rem;
+    letter-spacing: 0.5px;
+}
+
+/* --- Закругления для карточек дашборда --- */
+.baton-dashboard .card {
+    border-radius: 12px !important;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+    transition: box-shadow 0.2s ease;
+}
+
+.baton-dashboard .card:hover {
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+}
+
+/* --- Таблицы: более аккуратные --- */
+.baton-table th {
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.3px;
+    color: #6c757d;
+}
+
+.baton-table td {
+    vertical-align: middle;
+}
+
+/* --- Чипсы для статусов (пример для Order.status) --- */
+.status-badge {
+    display: inline-block;
+    padding: 0.25em 0.65em;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: 50px;
+    text-transform: uppercase;
+}
+
+.status-badge-new {
+    background-color: #e3f2fd;
+    color: #1565c0;
+}
+
+.status-badge-confirmed {
+    background-color: #fff3e0;
+    color: #e65100;
+}
+
+.status-badge-assembled {
+    background-color: #f3e5f5;
+    color: #7b1fa2;
+}
+
+.status-badge-sent {
+    background-color: #e8f5e9;
+    color: #2e7d32;
+}
+
+.status-badge-delivered {
+    background-color: #f1f8e9;
+    color: #33691e;
+}
+
+.status-badge-canceled {
+    background-color: #ffebee;
+    color: #c62828;
+}
+
+/* --- Превью изображений в списке --- */
+.admin-image-preview {
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    transition: transform 0.2s ease;
+}
+
+.admin-image-preview:hover {
+    transform: scale(2);
+    z-index: 1000;
+    position: relative;
+    cursor: pointer;
+}
+
+/* --- Анимация загрузки --- */
+.baton-spinner {
+    border-width: 3px !important;
+}
+
+/* --- Тёмная тема: тонкие правки --- */
+[data-bs-theme="dark"] .baton-table th {
+    color: #adb5bd;
+}
+
+[data-bs-theme="dark"] .baton-dashboard .card {
+    background-color: #2b2b2b;
+    border-color: #404040;
+}
+
+/* --- Админка: кнопки действий --- */
+.baton-actions .btn {
+    border-radius: 8px;
+    padding: 0.4rem 0.8rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+    transition: all 0.15s ease;
+}
+
+.baton-actions .btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* --- Фильтры в виде красивых чипсов --- */
+.baton-filter-chip {
+    border-radius: 50px !important;
+    padding: 0.25rem 0.75rem !important;
+    font-size: 0.8rem !important;
+}

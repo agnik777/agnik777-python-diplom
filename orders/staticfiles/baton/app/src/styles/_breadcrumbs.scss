@@ -1,0 +1,29 @@
+// scss-lint:disable IdSelector PlaceholderInExtend NestingDepth
+.breadcrumbs {
+  @extend .p-3;
+  background: var(--bs-baton-breadcrumbs-bg);
+  color: var(--bs-baton-breadcrumbs-color);
+  display: flex;
+  gap: 0.5rem;
+  line-height: 2;
+  word-spacing: 5px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  flex-wrap: wrap;
+
+  a {
+    color: var(--bs-baton-breadcrumbs-link-color);
+    &:first-child {
+      &::before {
+        @extend %material;
+        @extend .me-1;
+        content: 'home';
+        vertical-align: middle;
+        display: inline-block;
+        position: relative;
+        top: -3px;
+      }
+    }
+  }
+}
