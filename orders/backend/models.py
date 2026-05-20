@@ -1,5 +1,4 @@
 # backend/models.py
-import os
 import uuid
 import logging
 from django.contrib.auth.base_user import BaseUserManager
@@ -12,7 +11,7 @@ from django.core.validators import FileExtensionValidator
 from django.utils.translation import gettext_lazy as _
 from django_rest_passwordreset.tokens import get_token_generator
 from imagekit.models import ImageSpecField, ProcessedImageField
-from imagekit.processors import ResizeToFill, ResizeToFit, SmartResize, Transpose
+from imagekit.processors import ResizeToFill, ResizeToFit, SmartResize
 from imagekit.cachefiles import ImageCacheFile
 
 from .utils import ProductUtils

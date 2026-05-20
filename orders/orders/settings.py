@@ -13,7 +13,6 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 import os
 
-from django.conf.global_settings import STATICFILES_DIRS
 from dotenv import load_dotenv
 from pathlib import Path
 import dj_database_url
@@ -53,7 +52,6 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
-
     'rest_framework',
     'rest_framework.authtoken',
     'django_rest_passwordreset',
@@ -68,7 +66,6 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    # 'baton.middleware.BatonAuthenticationMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -90,7 +87,6 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
-                # 'baton.context_processors',
             ],
         },
     },
@@ -123,7 +119,6 @@ AUTH_PASSWORD_VALIDATORS = [
         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
     },
 ]
-
 
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
@@ -197,7 +192,6 @@ REST_FRAMEWORK = {
     }
 }
 
-
 SPECTACULAR_SETTINGS = {
     'SWAGGER_UI_DIST': 'SIDECAR',
     'SWAGGER_UI_FAVICON_HREF': 'SIDECAR',
@@ -253,29 +247,32 @@ IMAGEKIT_DEFAULT_CACHEFILE_STRATEGY = 'imagekit.cachefiles.strategies.Optimistic
 # Настройки кеша (опционально, для хранения сгенерированных миниатюр)
 IMAGEKIT_CACHEFILE_DIR = 'cache/images'
 
-# Настройки social-auth
+# ========== SOCIAL-AUTH (Яндекс OAuth2) ==========
 AUTHENTICATION_BACKENDS = (
     'social_core.backends.yandex.YandexOAuth2',
     'django.contrib.auth.backends.ModelBackend',
 )
 
-# Яндекс OAuth
+AUTHENTICATION_BACKENDS = (
+    'social_core.backends.yandex.YandexOAuth2',
+    'django.contrib.auth.backends.ModelBackend',
+)
+
+# Яндекс OAuth2
 SOCIAL_AUTH_YANDEX_OAUTH2_KEY = os.getenv('YANDEX_APP_ID', '')
 SOCIAL_AUTH_YANDEX_OAUTH2_SECRET = os.getenv('YANDEX_APP_SECRET', '')
-SOCIAL_AUTH_YANDEX_OAUTH2_SCOPE = ['login:email', 'login:avatar', 'login:info']
-# SOCIAL_AUTH_YANDEX_OAUTH2_ENDPOINT = 'https://oauth.yandex.ru'
+SOCIAL_AUTH_YANDEX_OAUTH2_SCOPE = ['login:email', 'login:info', 'login:avatar']
 
-# SOCIAL_AUTH_REDIRECT_IS_HTTPS = False
-# Настройки полей пользователя
-SOCIAL_AUTH_USER_FIELDS = ['email', 'first_name', 'last_name', 'username']
-SOCIAL_AUTH_EMAIL_AS_USERNAME = True
-SOCIAL_AUTH_USERNAME_IS_FULL_EMAIL = True
+# Используем email как username
+USERNAME_FIELD = 'email'
 
-# Отключаем создание username — используем email
-SOCIAL_AUTH_PROTECTED_USER_FIELDS = ['email', 'first_name', 'last_name']
-SOCIAL_AUTH_SLUGIFY_USERNAMES = True
+# Поля, которые заполняются из соцсети
+SOCIAL_AUTH_USER_FIELDS = ['email', 'first_name', 'last_name']
 
-# Адрес, куда перенаправить после успешного входа (без фронтенда — отдаём JSON)
+# Разрешаем обновление всех полей
+SOCIAL_AUTH_PROTECTED_USER_FIELDS = []
+
+# Указываем URL для редиректа
 SOCIAL_AUTH_LOGIN_REDIRECT_URL = '/api/social-auth/complete/'
 SOCIAL_AUTH_LOGIN_ERROR_URL = '/api/social-auth/error/'
 
@@ -285,12 +282,11 @@ SOCIAL_AUTH_PIPELINE = (
     'social_core.pipeline.social_auth.social_uid',
     'social_core.pipeline.social_auth.auth_allowed',
     'social_core.pipeline.social_auth.social_user',
-    'social_core.pipeline.user.get_username',
+    'backend.pipeline.associate_by_email_or_create',
     'social_core.pipeline.user.create_user',
     'social_core.pipeline.social_auth.associate_user',
     'social_core.pipeline.social_auth.load_extra_data',
-    'social_core.pipeline.user.user_details',
-    'backend.pipeline.save_yandex_avatar',
+    'backend.pipeline.save_yandex_data',
 )
 
 # URL-префикс для social-auth
@@ -491,35 +487,21 @@ CACHEOPS_ENABLED = True              # включить кэширование
 # ========== DJANGO-BATON CONFIGURATION ==========
 
 BATON = {
-    # --------------------------
     # 🌐 Внешний вид и брендинг
-    # --------------------------
     'SITE_HEADER': 'Orders Admin Panel',
     'SITE_TITLE': 'Orders Admin',
     'INDEX_TITLE': 'Панель управления заказами',
-    'SUPPORT_HREF': 'https://t.me/your_support',  # ссылка на поддержку
-    'COPYRIGHT': '© 2026 Orders API Team',         # копирайт в подвале
+    'SUPPORT_HREF': 'https://t.me/your_support',
+    'COPYRIGHT': '© 2026 Orders API Team',
 
-    # --------------------------
     # 🎨 Тема оформления
-    # --------------------------
-    'THEME': 'default',          # 'default' | 'dark-blue' | 'sand' | 'green'
-                                 # можно также 'cerulean', 'cosmo', 'flatly', 'journal',
-                                 # 'litera', 'lumen', 'lux', 'materia', 'minty',
-                                 # 'pulse', 'sandstone', 'simplex', 'sketchy',
-                                 # 'slate', 'solar', 'spacelab', 'superhero',
-                                 # 'united', 'yeti'
-    'THEME_TOGGLE': 'default',   # показывать кнопку переключения темы
-                                 # 'default' — список из 4 предустановленных тем
-                                 # 'all' — все доступные темы
-                                 # False — отключить
+    'THEME': 'default',
+    'THEME_TOGGLE': 'default',
 
-    # --------------------------
     # 📌 Collapsible сайдбар (боковое меню)
-    # --------------------------
-    'MENU_ALWAYS_COLLAPSED': False,         # меню свёрнуто по умолчанию
-    'MENU_TITLE': 'Меню',                   # заголовок меню
-    'MENU_ICONS': {                         # иконки для моделей (Font Awesome 5)
+    'MENU_ALWAYS_COLLAPSED': False,
+    'MENU_TITLE': 'Меню',
+    'MENU_ICONS': {
         'User': 'fas fa-user',
         'Shop': 'fas fa-store',
         'Category': 'fas fa-tags',
@@ -537,10 +519,8 @@ BATON = {
         'LogEntry': 'fas fa-history',
     },
 
-    # --------------------------
     # 📂 Группировка приложений в сайдбаре
-    # --------------------------
-    'MENU_ORDER': [                     # порядок и группировка
+    'MENU_ORDER': [
         {
             'label': 'Пользователи',
             'icon': 'fas fa-user-friends',
@@ -582,55 +562,39 @@ BATON = {
         },
     ],
 
-    # --------------------------
     # 🧩 Фильтры как select2 (удобный поиск)
-    # --------------------------
-    'SELECT2': True,                     # все ForeignKey/ManyToMany поля станут select2
-    'SELECT2_CSS': True,                 # подключить CSS для select2
-    'SELECT2_JS': True,                  # подключить JS для select2
+    'SELECT2': True,
+    'SELECT2_CSS': True,
+    'SELECT2_JS': True,
 
-    # --------------------------
     # 🎯 Collapsible inline-блоки
-    # --------------------------
-    'COLLAPSABLE_INLINE_ADMIN': True,    # inline-формы можно сворачивать
-    'INLINE_COLLAPSED': False,           # по умолчанию inline не свёрнуты
+    'COLLAPSABLE_INLINE_ADMIN': True,
+    'INLINE_COLLAPSED': False,
 
-    # --------------------------
     # 📊 Показывать тоггл для фильтров
-    # --------------------------
-    'SHOW_FILTERS_TOGGLE': True,         # кнопка "Показать/скрыть фильтры"
+    'SHOW_FILTERS_TOGGLE': True,
 
-    # --------------------------
     # 🔍 Дополнительные настройки
-    # --------------------------
     'SEARCH_FIELD': {
         'placeholder': 'Поиск по всей админке...',
         'submit_btn': 'Найти',
     },
 
-    # --------------------------
     # 🗑️ Подтверждение массовых действий
-    # --------------------------
-    'CONFIRM_CHANGES': True,             # подтверждение перед массовыми изменениями
-    'CONFIRM_DELETE': True,              # красивое модальное окно подтверждения удаления
+    'CONFIRM_CHANGES': True,
+    'CONFIRM_DELETE': True,
 
-    # --------------------------
     # 🖼️ Аватарка пользователя (если есть поле avatar)
-    # --------------------------
-    'GRAVATAR_DEFAULT_IMAGE': 'mp',      # 'mp' — mystery person
-    'GRAVATAR_ENABLED': False,           # используем свой avatar, не Gravatar
-    'AVATAR_FIELD': 'avatar',            # поле модели User, где хранится аватар
-    'AVATAR_URL_FIELD': 'avatar_url',    # поле с URL аватара (если есть)
+    'GRAVATAR_DEFAULT_IMAGE': 'mp',
+    'GRAVATAR_ENABLED': False,
+    'AVATAR_FIELD': 'avatar',
+    'AVATAR_URL_FIELD': 'avatar_url',
 
-    # --------------------------
     # 📱 Адаптивность
-    # --------------------------
-    'MOBILE_FILTERS': True,              # фильтры в мобильной версии через выпадающий список
-    'MOBILE_HORIZONTAL': True,           # горизонтальная навигация на мобильных
+    'MOBILE_FILTERS': True,
+    'MOBILE_HORIZONTAL': True,
 
-    # --------------------------
     # 🔧 Экспериментальные функции
-    # --------------------------
-    'CHANGELIST_FILTERS_IN_MODAL': True, # фильтры в модальном окне (удобно при малом экране)
-    'CHANGEFORM_FIXED_SUBMIT_ROW': True, # зафиксировать кнопки "Сохранить" внизу
+    'CHANGELIST_FILTERS_IN_MODAL': True,
+    'CHANGEFORM_FIXED_SUBMIT_ROW': True,
 }

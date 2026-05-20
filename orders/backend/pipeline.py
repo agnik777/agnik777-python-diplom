@@ -4,37 +4,72 @@
 Сохраняем аватар из Яндекса, активируем пользователя, выдаём токен.
 """
 
+from django.core.exceptions import ObjectDoesNotExist
+from django.contrib.auth import get_user_model
 from rest_framework.authtoken.models import Token
+import logging
 
 
-def save_yandex_avatar(backend, strategy, details, response, user=None, *args, **kwargs):
+logger = logging.getLogger(__name__)
+User = get_user_model()
+
+def associate_by_email_or_create(backend, strategy, *args, **kwargs):
     """
-    Сохраняем аватар из профиля Яндекса в поле avatar_url.
-    Активируем пользователя (is_active=True), если он создан через соцсеть.
+    Связываем пользователя по email или создаем нового,
+    если пользователя с таким email не существует.
     """
+    user = kwargs.get('user')
+    details = kwargs.get('details')
+    response = kwargs.get('response')
+
+    if not user and details.get('email'):
+        try:
+            user = User.objects.get(email=details['email'])
+        except ObjectDoesNotExist:
+            pass  # Сохранится в social_core.pipeline.user.create_user
+
+    return {'user': user}
+
+def save_yandex_data(backend, strategy, details, response, *args, **kwargs):
+    """
+    Сохраняем данные из Яндекса:
+    - аватарку
+    - имя/фамилию
+    - email (если пустой)
+    - создаем/обновляем токен
+    """
+    user = kwargs.get('user')
     if not user:
         return
 
-    # Активируем пользователя (для новых — сразу активен)
-    if not user.is_active:
-        user.is_active = True
+    try:
+        # 1️⃣ Сохраняем avatar_url
+        avatar_id = response.get('default_avatar_id')
+        is_default = response.get('is_default_avatar', True)
 
-    # Сохраняем аватар из Яндекса
-    if backend.name == 'yandex-oauth2':
-        # Яндекс возвращает default_avatar_id — формируем URL
-        avatar_id = response.get('default_avatar_id', '')
-        if avatar_id:
+        if avatar_id and not is_default:
             user.avatar_url = f'https://avatars.yandex.net/get-yapic/{avatar_id}/islands-200'
+        elif not user.avatar_url:
+            user.avatar_url = None  # Сбрасываем, если аватара нет
 
-        # Если email не пришёл (бывает редко), генерируем
-        if not user.email and 'email' not in details:
-            ya_id = response.get('id', '')
-            user.email = f'yandex_{ya_id}@social.local'
+        # 2️⃣ Обновляем имя/фамилию
+        user.first_name = response.get('first_name', user.first_name)
+        user.last_name = response.get('last_name', user.last_name)
 
-    user.save()
+        # 3️⃣ Если email не задан — берем из Яндекса
+        if not user.email:
+            user.email = response.get('default_email',
+                                      f'yandex_{response["id"]}@local.social')
 
-    # Создаём или получаем токен
-    token, _ = Token.objects.get_or_create(user=user)
+        user.save()
 
-    # Сохраняем токен в стратегии, чтобы вернуть его в ответе
-    strategy.session['social_auth_token'] = token.key
+        # 4️⃣ Создаем/обновляем токен
+        token, created = Token.objects.get_or_create(user=user)
+        logger.info(
+            f"Successfully saved Yandex data for user {user.email}. "
+            f"Token: {token.key[:8]}... (created: {created})"
+        )
+
+    except Exception as e:
+        logger.error(f"Error saving Yandex data: {e}")
+        raise  # Прерываем pipeline на ошибке

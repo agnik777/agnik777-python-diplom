@@ -150,11 +150,20 @@ class OrderUtils:
             if order_item.quantity < available_qty:
                 order_item.quantity += 1
                 order_item.save()
-                return {'success': True, 'message': 'Количество товара увеличено', 'item': order_item}
+                return {'success': True,
+                        'message': 'Количество товара увеличено',
+                        'item': order_item}
             else:
-                return {'success': False, 'error': f'Доступно только {available_qty} единиц товара'}
+                return {
+                    'success': False,
+                    'error': f'Доступно только {available_qty} единиц товара'
+                }
 
-        return {'success': True, 'message': 'Товар добавлен в корзину', 'item': order_item}
+        return {
+            'success': True,
+            'message': 'Товар добавлен в корзину',
+            'item': order_item
+        }
 
     @staticmethod
     def send_order_notifications(user, order, contact, phone) -> None:
@@ -163,7 +172,8 @@ class OrderUtils:
         OrderUtils._send_shop_owner_emails(order)
 
     @staticmethod
-    def send_order_confirmed_notifications(user, order, previous_status: str) -> None:
+    def send_order_confirmed_notifications(user, order,
+                                           previous_status: str) -> None:
         """Отправляет все уведомления при подтверждении заказа."""
         EmailUtils.send_order_confirmed_email(user, order)
         EmailUtils.send_order_status_changed_email(user, order, previous_status)
@@ -172,7 +182,8 @@ class OrderUtils:
     @staticmethod
     def _send_shop_owner_emails(order) -> None:
          """Отправляет email владельцам магазинов."""
-         # Исправлен вызов: теперь передается 4 аргумента вместо 5 (убран shop_total)
+         # Исправлен вызов: теперь передается 4 аргумента вместо 5
+         # (убран shop_total)
          shops_data = OrderUtils._get_shops_data(order)
          for shop_data in shops_data.values():
              EmailUtils.send_shop_order_email(
@@ -185,16 +196,18 @@ class OrderUtils:
     @staticmethod
     def _get_shops_data(order) -> Dict[int, Dict]:
         """Группирует товары заказа по магазинам (оптимизировано)."""
-        # Используем defaultdict для автоматической инициализации словаря для каждого магазина.
+        # Используем defaultdict для автоматической инициализации словаря
+        # для каждого магазина.
         # Ключ — ID магазина (целое число), а не строка.
         shops_data = defaultdict(lambda: {'items': [], 'total': 0})
 
         for item in order.order_items.all().select_related('product__shop'):
             shop = item.product.shop
-            shops_data[shop.id]['shop'] = shop  # Сохраняем объект магазина один раз на итерацию цикла по ключу.
+            shops_data[shop.id]['shop'] = shop
             shops_data[shop.id]['items'].append(item)
 
-        # Расчет суммы по каждому магазину (можно было бы сделать через annotate в БД,
+        # Расчет суммы по каждому магазину
+        # (можно было бы сделать через annotate в БД,
         # но для простоты и наглядности оставлен расчет на Python).
         for shop_id, data in shops_data.items():
             data['total'] = sum(
@@ -209,7 +222,9 @@ class EmailUtils(BaseEmailUtils):
     @staticmethod
     def send_order_created_email(user, order, contact, phone) -> None:
         """Email о создании заказа."""
-        items_text = "\n".join(EmailUtils._format_order_items(order.order_items.all()))
+        items_text = "\n".join(
+            EmailUtils._format_order_items(order.order_items.all())
+        )
         total = ProductUtils.calculate_order_total(order.order_items.all())
 
         message = f"""
@@ -229,12 +244,15 @@ class EmailUtils(BaseEmailUtils):
     Для подтверждения заказа перейдите в личный кабинет.
     Спасибо за ваш заказ!
     """
-        EmailUtils._send_email(f'Заказ №{order.id} создан', message, user.email)
+        EmailUtils._send_email(f'Заказ №{order.id} создан',
+                               message, user.email)
 
     @staticmethod
     def send_order_confirmed_email(user, order) -> None:
         """Email о подтверждении заказа."""
-        items_text = "\n".join(EmailUtils._format_order_items(order.order_items.all()))
+        items_text = "\n".join(
+            EmailUtils._format_order_items(order.order_items.all())
+        )
         total = ProductUtils.calculate_order_total(order.order_items.all())
 
         message = f"""
@@ -253,7 +271,8 @@ class EmailUtils(BaseEmailUtils):
     Мы свяжемся с вами для уточнения деталей доставки.
     Спасибо за ваш заказ!
     """
-        EmailUtils._send_email(f'Заказ №{order.id} подтвержден', message, user.email)
+        EmailUtils._send_email(f'Заказ №{order.id} подтвержден',
+                               message, user.email)
 
     @staticmethod
     def send_shop_order_email(shop_owner, shop, order, items) -> None:
@@ -289,7 +308,9 @@ class EmailUtils(BaseEmailUtils):
     @staticmethod
     def send_order_status_changed_email(user, order, previous_status: str) -> None:
         """Email об изменении статуса заказа."""
-        items_text = "\n".join(EmailUtils._format_order_items(order.order_items.all()))
+        items_text = "\n".join(
+            EmailUtils._format_order_items(order.order_items.all())
+        )
         total = ProductUtils.calculate_order_total(order.order_items.all())
 
         message = f"""

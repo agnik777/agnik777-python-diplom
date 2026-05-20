@@ -65,8 +65,6 @@ urlpatterns = [
 ]
 
 urlpatterns += [
-    path('social-auth/', include('social_django.urls',
-                                     namespace='social')),
     path('social-auth/complete/', SocialAuthCompleteView.as_view(),
          name='social-complete'),
     path('social-auth/error/', SocialAuthErrorView.as_view(),

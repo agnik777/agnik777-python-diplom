@@ -6,9 +6,7 @@ from datetime import timedelta
 from django.http import JsonResponse, Http404
 from django.utils import timezone
 from django.db.models import Q
-from django.core.mail import send_mail
 from django.core.exceptions import ValidationError
-from django.conf import settings
 from django.shortcuts import get_object_or_404
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema_view, extend_schema, \
@@ -39,7 +37,7 @@ from .serializers import (
     ProductImageUpdateSerializer, ProductImageBulkUploadSerializer,
     ProductImageListSerializer
 )
-from .utils import ProductUtils, OrderUtils
+from .utils import ProductUtils
 from .yaml_processor import YAMLProcessor
 from .file_loader import FileLoader
 from .permissions import IsShopOwner
@@ -59,9 +57,9 @@ logger = logging.getLogger(__name__)
 
 
 @extend_schema(
-    summary="Завершение авторизации через соцсеть (Яндекс)",
-    description="После успешной авторизации через Яндекс, "
-                "возвращает JWT-токен и данные пользователя.",
+    summary="Завершение авторизации через Яндекс",
+    description="Возвращает токен и данные пользователя после успешной "
+                "социальной авторизации.",
     responses={
         200: OpenApiResponse(
             response=inline_serializer(
@@ -73,12 +71,9 @@ logger = logging.getLogger(__name__)
                     "detail": OpenApiTypes.STR,
                 },
             ),
-            description="Успешная авторизация",
         ),
-        400: OpenApiResponse(description="Токен не найден или пользователь "
-                                         "не авторизован"),
+        400: OpenApiResponse(description="Авторизация не завершена"),
     },
-    tags=["Auth"],
 )
 class SocialAuthCompleteView(APIView):
     """
@@ -89,28 +84,22 @@ class SocialAuthCompleteView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        token_key = request.session.get('social_auth_token')
+        # 1️⃣ Проверяем, авторизован ли пользователь
+        if not request.user.is_authenticated:
+            return Response(
+                {"error": "Пользователь не авторизован"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        if not token_key:
-            # Пробуем найти токен по пользователю
-            if request.user.is_authenticated:
-                token, _ = Token.objects.get_or_create(user=request.user)
-                token_key = token.key
-            else:
-                return Response(
-                    {'error': 'Токен не найден. Авторизация не завершена.'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+        # 2️⃣ Получаем или создаем токен
+        token, created = Token.objects.get_or_create(user=request.user)
 
-        # Очищаем сессию
-        if 'social_auth_token' in request.session:
-            del request.session['social_auth_token']
-
+        # 3️⃣ Возвращаем токен и данные пользователя
         return Response({
-            'token': token_key,
-            'user_id': request.user.pk if request.user.is_authenticated else None,
-            'email': request.user.email if request.user.is_authenticated else None,
-            'detail': 'Авторизация через Яндекс успешна.'
+            "token": token.key,
+            "user_id": request.user.pk,
+            "email": request.user.email,
+            "detail": "Авторизация через Яндекс успешна."
         }, status=status.HTTP_200_OK)
 
 
@@ -148,8 +137,14 @@ class SocialAuthErrorView(APIView):
 
     def get(self, request):
         error = request.GET.get('error', 'Неизвестная ошибка')
+        logger.warning(f"Social auth error: {error}")
+
         return Response(
-            {'error': f'Ошибка авторизации: {error}'},
+            {
+                "error": error,
+                "detail": "Попробуйте авторизоваться снова. "
+                          "Если ошибка повторяется, обратитесь в поддержку."
+            },
             status=status.HTTP_400_BAD_REQUEST
         )
 
@@ -1167,7 +1162,8 @@ class OrderConfirmView(generics.GenericAPIView):
     get=extend_schema(
         summary='Список заказов пользователя',
         description='Возвращает все заказы текущего пользователя, '
-                    'исключая корзину (статус basket). Сортировка по дате (сначала новые).',
+                    'исключая корзину (статус basket). '
+                    'Сортировка по дате (сначала новые).',
         responses={
             200: OrderListSerializer(many=True),
             401: OpenApiResponse(description='Не авторизован'),
@@ -1387,7 +1383,8 @@ class ContactDetailView(generics.RetrieveUpdateDestroyAPIView):
         description='Владелец магазина может изменить '
                     'параметр permissions_order для своего магазина.',
         parameters=[
-            OpenApiParameter('pk', OpenApiTypes.INT, OpenApiParameter.PATH,
+            OpenApiParameter('pk', OpenApiTypes.INT,
+                             OpenApiParameter.PATH,
                              description='ID магазина'),
         ],
         request=ShopPermissionSerializer,

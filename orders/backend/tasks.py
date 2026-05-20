@@ -38,7 +38,8 @@ def send_email_with_retry_task(self, subject, message, recipient_email):
     """
     try:
         EmailUtils._send_email(subject, message, recipient_email)
-        logger.info(f'Критический email отправлен на {recipient_email}: {subject}')
+        logger.info(f'Критический email отправлен на '
+                    f'{recipient_email}: {subject}')
         return {'success': True, 'recipient': recipient_email}
     except Exception as exc:
         logger.error(f'Критическая ошибка email на {recipient_email}: {exc}')
@@ -56,7 +57,8 @@ def send_confirmation_email_task(user_id, token_key):
     try:
         user = User.objects.get(id=user_id)
     except User.DoesNotExist:
-        logger.error(f'Пользователь {user_id} не найден при отправке подтверждения')
+        logger.error(f'Пользователь {user_id} не найден при отправке '
+                     f'подтверждения')
         return {'success': False, 'error': 'User not found'}
 
     confirmation_url = f"{settings.BACKEND_URL}/api/confirm-email/{token_key}/"
@@ -94,7 +96,8 @@ def send_order_created_email_task(user_id, order_id):
         order = Order.objects.select_related('contact').get(id=order_id)
         items = order.order_items.all().select_related('product')
     except (User.DoesNotExist, Order.DoesNotExist) as e:
-        logger.error(f'Ошибка при отправке уведомления о заказе {order_id}: {e}')
+        logger.error(f'Ошибка при отправке уведомления о '
+                     f'заказе {order_id}: {e}')
         return {'success': False, 'error': str(e)}
 
     items_text = "\n".join(EmailUtils._format_order_items(items))
@@ -138,7 +141,8 @@ def send_order_confirmed_email_task(user_id, order_id):
         order = Order.objects.select_related('contact').get(id=order_id)
         items = order.order_items.all().select_related('product')
     except (User.DoesNotExist, Order.DoesNotExist) as e:
-        logger.error(f'Ошибка при отправке подтверждения заказа {order_id}: {e}')
+        logger.error(f'Ошибка при отправке подтверждения '
+                     f'заказа {order_id}: {e}')
         return {'success': False, 'error': str(e)}
 
     items_text = "\n".join(EmailUtils._format_order_items(items))
@@ -182,7 +186,8 @@ def send_order_status_changed_email_task(user_id, order_id, previous_status):
         order = Order.objects.select_related('contact').get(id=order_id)
         items = order.order_items.all().select_related('product')
     except (User.DoesNotExist, Order.DoesNotExist) as e:
-        logger.error(f'Ошибка при отправке уведомления о статусе {order_id}: {e}')
+        logger.error(f'Ошибка при отправке уведомления '
+                     f'о статусе {order_id}: {e}')
         return {'success': False, 'error': str(e)}
 
     items_text = "\n".join(EmailUtils._format_order_items(items))

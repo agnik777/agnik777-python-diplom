@@ -662,8 +662,10 @@ class AvatarSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('id', 'avatar', 'avatar_url', 'avatar_display_url', 'email', 'first_name', 'last_name')
-        read_only_fields = ('id', 'email', 'first_name', 'last_name', 'avatar_url', 'avatar_display_url')
+        fields = ('id', 'avatar', 'avatar_url', 'avatar_display_url',
+                  'email', 'first_name', 'last_name')
+        read_only_fields = ('id', 'email', 'first_name', 'last_name',
+                            'avatar_url', 'avatar_display_url')
 
     def validate_avatar(self, value):
         """Валидация загружаемого аватара."""
@@ -692,7 +694,8 @@ class ProductImageListSerializer(serializers.ModelSerializer):
     Возвращает URL'ы миниатюр (уже сгенерированных Celery).
     """
     thumbnails = serializers.SerializerMethodField()
-    product_name = serializers.CharField(source='product_info.full_name', read_only=True)
+    product_name = serializers.CharField(source='product_info.full_name',
+                                         read_only=True)
 
     class Meta:
         model = ProductImage
@@ -764,7 +767,8 @@ class ProductImageUploadSerializer(serializers.ModelSerializer):
         allowed = ['image/jpeg', 'image/png', 'image/webp']
         if value.content_type not in allowed:
             raise serializers.ValidationError(
-                f'Допустимые форматы: JPEG, PNG, WebP. Получен: {value.content_type}'
+                f'Допустимые форматы: JPEG, PNG, WebP. '
+                f'Получен: {value.content_type}'
             )
         return value
 
@@ -798,12 +802,14 @@ class ProductImageBulkUploadSerializer(serializers.Serializer):
         for img in value:
             if img.content_type not in allowed_formats:
                 raise serializers.ValidationError(
-                    f'Файл "{img.name}" имеет недопустимый формат {img.content_type}. '
+                    f'Файл "{img.name}" имеет недопустимый '
+                    f'формат {img.content_type}. '
                     f'Разрешены: JPEG, PNG, WebP.'
                 )
             if img.size > max_size:
                 raise serializers.ValidationError(
-                    f'Файл "{img.name}" превышает 10 МБ ({img.size / 1024 / 1024:.1f} МБ).'
+                    f'Файл "{img.name}" превышает 10 МБ '
+                    f'({img.size / 1024 / 1024:.1f} МБ).'
                 )
         return value
 

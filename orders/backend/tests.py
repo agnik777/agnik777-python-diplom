@@ -143,7 +143,8 @@ class ThrottlingTestCase(TestCase):
 
         # Создаём новый токен для 11-го запроса
         token2 = ConfirmEmailToken.objects.create(user=user)
-        url2 = reverse('confirm-email', kwargs={'token_key': token2.key})
+        url2 = reverse('confirm-email',
+                       kwargs={'token_key': token2.key})
 
         response = self.client.get(url2)
         self.assertEqual(
